@@ -236,10 +236,10 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
             v-if="!hasAccounts"
             icon="mdi:receipt-text-outline"
             title="还没有可展示的交易"
-            description="先绑定 PayPal 商家账号并同步账单。"
+            description="先绑定收款账号并同步账单（当前支持 PayPal）。"
           >
             <template #actions>
-              <NButton type="primary" @click="startPayPalOAuth()">授权 PayPal 账号</NButton>
+              <NButton type="primary" @click="startPayPalOAuth()">授权收款账号</NButton>
             </template>
           </PpEmptyState>
           <PpEmptyState
