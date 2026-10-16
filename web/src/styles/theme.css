@@ -1,0 +1,337 @@
+:root {
+  --pp-blue: #0070ba;
+  --pp-blue-hover: #005ea6;
+  --pp-blue-deep: #003087;
+  --pp-blue-soft: rgba(0, 112, 186, 0.1);
+  --pp-sidebar: #0b1f3a;
+  --pp-sidebar-hover: rgba(255, 255, 255, 0.06);
+  --pp-sidebar-active: rgba(0, 112, 186, 0.28);
+  --pp-bg: #f0f3f8;
+  --pp-card: #ffffff;
+  --pp-border: #e3e8ef;
+  --pp-border-strong: #d0d7e2;
+  --pp-text: #1a2332;
+  --pp-muted: #6b7a90;
+  --pp-success: #16a34a;
+  --pp-success-bg: #e8f8ef;
+  --pp-warning: #d97706;
+  --pp-warning-bg: #fff7e8;
+  --pp-danger: #dc2626;
+  --pp-danger-bg: #fdecec;
+  --pp-info: #0284c7;
+  --pp-info-bg: #e8f4fc;
+  --pp-shadow: 0 1px 2px rgba(15, 35, 60, 0.04), 0 4px 16px rgba(15, 35, 60, 0.05);
+  --pp-shadow-md: 0 4px 24px rgba(15, 35, 60, 0.08);
+  --pp-radius: 10px;
+  --pp-radius-sm: 6px;
+  --pp-sidebar-width: 220px;
+  --pp-topbar-height: 56px;
+  --pp-font: 'Plus Jakarta Sans', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+  font-family: var(--pp-font);
+  color: var(--pp-text);
+  background: var(--pp-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--pp-blue);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--pp-blue-deep);
+}
+
+/* —— page —— */
+.pp-page {
+  animation: pp-fade 0.28s ease both;
+}
+
+.pp-page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.pp-page-title {
+  margin: 0 0 4px;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--pp-text);
+  line-height: 1.25;
+}
+
+.pp-page-desc {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--pp-muted);
+  line-height: 1.5;
+}
+
+.pp-card {
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius);
+  box-shadow: var(--pp-shadow);
+}
+
+.pp-panel {
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius);
+  box-shadow: var(--pp-shadow);
+  overflow: hidden;
+}
+
+.pp-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--pp-border);
+}
+
+.pp-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+
+.pp-panel__body {
+  padding: 16px 18px;
+}
+
+/* —— status badge —— */
+.pp-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.pp-badge--ok {
+  color: #15803d;
+  background: var(--pp-success-bg);
+}
+
+.pp-badge--warn {
+  color: #b45309;
+  background: var(--pp-warning-bg);
+}
+
+.pp-badge--bad {
+  color: #b91c1c;
+  background: var(--pp-danger-bg);
+}
+
+.pp-badge--info {
+  color: #0369a1;
+  background: var(--pp-info-bg);
+}
+
+.pp-badge--mute {
+  color: var(--pp-muted);
+  background: #eef1f6;
+}
+
+/* —— filter bar —— */
+.pp-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius);
+  box-shadow: var(--pp-shadow);
+  margin-bottom: 14px;
+}
+
+.pp-filter__field {
+  width: 168px;
+  flex: 0 0 168px;
+}
+
+.pp-filter__field--account {
+  width: 320px;
+  flex-basis: 320px;
+}
+
+.pp-filter__field--wide {
+  width: 260px;
+  flex-basis: 260px;
+}
+
+.pp-filter__search {
+  position: relative;
+  width: 320px;
+  flex: 0 0 320px;
+  max-width: 100%;
+}
+
+/* —— table shell —— */
+.pp-table-wrap {
+  background: var(--pp-card);
+  border: 1px solid var(--pp-border);
+  border-radius: var(--pp-radius);
+  box-shadow: var(--pp-shadow);
+  overflow: hidden;
+}
+
+.pp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.pp-table th {
+  padding: 12px 16px;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--pp-muted);
+  background: #f7f9fc;
+  border-bottom: 1px solid var(--pp-border);
+  white-space: nowrap;
+}
+
+.pp-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #eef1f6;
+  color: var(--pp-text);
+  vertical-align: middle;
+}
+
+.pp-table tr:last-child td {
+  border-bottom: none;
+}
+
+.pp-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.pp-table__link {
+  color: var(--pp-blue);
+  font-weight: 550;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.pp-table__link:hover {
+  color: var(--pp-blue-deep);
+  text-decoration: underline;
+}
+
+.pp-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--pp-border);
+  background: #fafbfc;
+}
+
+.pp-pager__meta {
+  font-size: 0.78rem;
+  color: var(--pp-muted);
+}
+
+/* —— empty —— */
+.pp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.pp-empty--compact {
+  padding: 36px 20px;
+}
+
+.pp-empty__icon {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  color: var(--pp-blue);
+  background: var(--pp-blue-soft);
+}
+
+.pp-empty__title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--pp-text);
+}
+
+.pp-empty__desc {
+  margin: 0;
+  max-width: 42ch;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--pp-muted);
+}
+
+.pp-empty__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@keyframes pp-fade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .pp-page-title {
+    font-size: 1.2rem;
+  }
+
+  .pp-filter__search,
+  .pp-filter__field,
+  .pp-filter__field--account,
+  .pp-filter__field--wide {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}

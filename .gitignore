@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+.output/
+*.tsbuildinfo
+
+# local env / secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+!.env.test
+
+# archives / junk
+*.zip
+*.tgz
+.DS_Store
+
+# logs / IDE
+logs/
+*.log
+.idea/
+.vscode/
+
+# local data dumps
+**/data/*.json
+!**/data/.gitkeep
