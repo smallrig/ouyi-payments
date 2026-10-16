@@ -50,11 +50,11 @@ onMounted(async () => {
       <div class="login__brand">
         <div class="login__logo-row">
           <span class="login__pp-mark">
-            <Icon icon="mdi:paypal" width="28" />
+            <Icon icon="mdi:wallet-outline" width="28" />
           </span>
-          <span class="login__pp-word">PayPal</span>
+          <span class="login__pp-word">Payments</span>
         </div>
-          <p class="login__sub">统一管理您的 PayPal 账号，查看交易记录和客户投诉</p>
+          <p class="login__sub">统一管理收款账号，查看交易流水与客户争议</p>
       </div>
 
       <p v-if="error" class="login__hint login__hint--error">{{ error }}</p>

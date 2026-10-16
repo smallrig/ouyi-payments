@@ -173,8 +173,8 @@ onMounted(() => void load());
     <header class="hero">
       <div class="hero__copy">
         <p class="hero__greet">{{ greeting }}，{{ auth.displayName || '管理员' }}</p>
-        <h1 class="hero__title">PayPal 经营概览</h1>
-        <p class="hero__desc">账号状态、收款流水与风险事项集中查看</p>
+        <h1 class="hero__title">收款经营概览</h1>
+        <p class="hero__desc">账号状态、交易流水与风险事项集中查看</p>
       </div>
       <div class="hero__actions">
         <NButton quaternary @click="load">

@@ -217,8 +217,8 @@ watch([keyword, statusFilter], () => resetPage());
   <div class="pp-page">
     <div class="pp-page-head">
       <div>
-        <h1 class="pp-page-title">PayPal 账号管理</h1>
-        <p class="pp-page-desc">绑定商家账号，分配负责人，同步账单与查单</p>
+        <h1 class="pp-page-title">收款账号管理</h1>
+        <p class="pp-page-desc">绑定收款账号，分配负责人，同步账单与查单（当前支持 PayPal）</p>
       </div>
       <NButton type="primary" @click="startPayPalOAuth()">
         <template #icon><Icon icon="mdi:paypal" width="16" /></template>

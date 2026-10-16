@@ -23,7 +23,7 @@ export class RecordsController {
     const config = this.paypal.config();
     return {
       ok: true,
-      service: 'paypal-admin-service',
+      service: 'payments-admin-service',
       env: config.envName,
       port: config.port,
       database: config.database,

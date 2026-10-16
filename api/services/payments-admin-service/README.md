@@ -1,11 +1,13 @@
-# PayPal 多账号管理 API（paypal-admin-service）
+# Payments 管理 API（payments-admin-service）
 
-NestJS 管理端后端，端口 **3025**，接口前缀 **`/api`**。账号、交易缓存、Webhook 与 API 日志存在 PostgreSQL 库 **`yxshop_paypal`**（`127.0.0.1:5432`）。
+NestJS 管理端后端，端口 **3025**，接口前缀 **`/api`**。收款账号、交易缓存、Webhook 与 API 日志存在 PostgreSQL（默认库名 `yxshop_paypal`，可按环境调整）。
+
+当前实现以 **PayPal** 渠道为主（OAuth、Transaction Search、争议）；接口按「多账号」模型组织，便于后续接入其它收款渠道。
 
 ## 快速开始
 
 ```bash
-cd paypal/api/services/paypal-admin-service
+cd payments/api/services/payments-admin-service
 cp .env.example .env
 # 填入 PAYPAL_CLIENT_ID、PAYPAL_CLIENT_SECRET，并在 PayPal Developer 中配置 Return URL：
 # http://127.0.0.1:3025/api/callback
@@ -16,7 +18,7 @@ npm run dev
 
 健康检查：`GET http://127.0.0.1:3025/api/health`
 
-## OAuth 绑定商家
+## OAuth 绑定商家（PayPal）
 
 1. 浏览器或管理端打开：`GET /api/auth/start`（可选 `?accountId=` 用于关联已有 payerId）
 2. 登录 PayPal 沙箱商家并同意授权
@@ -45,7 +47,7 @@ npm run dev
 
 ## 数据
 
-全部在 PostgreSQL 库 `yxshop_paypal`，不再读写本地 JSON：
+默认 PostgreSQL 库 `yxshop_paypal`：
 
 - `pp_account` — 商家账号
 - `pp_transaction` — 交易记录，一行一笔

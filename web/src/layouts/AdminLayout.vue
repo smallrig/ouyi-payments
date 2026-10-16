@@ -57,11 +57,11 @@ const initial = computed(() => (auth.displayName || 'U').slice(0, 1).toUpperCase
     <aside class="sider">
       <div class="brand">
         <div class="brand__mark" aria-hidden="true">
-          <Icon icon="mdi:paypal" width="20" />
+          <Icon icon="mdi:wallet-outline" width="20" />
         </div>
         <div class="brand__text">
-          <span class="brand__title">PayPal</span>
-          <span class="brand__sub">账号管理系统</span>
+          <span class="brand__title">Payments</span>
+          <span class="brand__sub">收款与流水</span>
         </div>
       </div>
 

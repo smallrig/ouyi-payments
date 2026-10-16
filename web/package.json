@@ -1,9 +1,9 @@
 {
-  "name": "paypal-admin-web",
+  "name": "payments-web",
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "PayPal 多账号管理 — ouyi-shop workbench (app_code=paypal)",
+  "description": "Payments — 收款账号与交易流水（ouyi-shop workbench, app_code=payments）",
   "scripts": {
     "build": "vite build --mode prod",
     "predev": "node kill-port.cjs",

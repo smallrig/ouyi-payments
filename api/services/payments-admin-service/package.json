@@ -1,5 +1,5 @@
 {
-  "name": "paypal-admin-service",
+  "name": "payments-admin-service",
   "version": "1.0.0",
   "private": true,
   "engines": {
