@@ -1,42 +1,57 @@
 # Payments · 收款账号与交易流水
 
-跨境收款后台：集中管理多家收款账号、分配负责人、同步账单与争议。当前已接入 **PayPal** 商家登录授权（方案一）；后续可扩展 Stripe、银行账户等其它渠道，统一查看交易流水。
+跨境收款后台：集中管理收款账号、分配负责人、同步账单与争议。当前渠道为 **PayPal**，后续可扩展其它渠道。
 
-工作台 `app_code=payments`（历史环境可能仍为 `paypal`，需与 Identity 对齐）。浏览器登录走 Logto，本服务再用门户会话签发自己的 JWT。
+工作台 `app_code=paypal`。登录走 Identity：**账号密码** 或 Portal **SSO ticket**（与 shop / store-design 相同模式）。本服务不签发登录 JWT，只校验 Identity JWT。
 
 | 组件 | 端口 | 说明 |
 |------|------|------|
 | `web/` | **9713** | Vue 3 管理端 SPA |
-| `api/services/payments-admin-service/` | **3025** | 多账号 API；PayPal OAuth / 查单 / 争议 |
+| `api/services/payments-admin-service/` | **3025** | 业务 API（PayPal OAuth / 查单 / 争议） |
 
-网关代理：`/api/paypal/*` 或 `/api/payments/*` → `payments-admin-service`（`PAYMENTS_ADMIN_SERVICE_URL` / 兼容 `PAYPAL_ADMIN_SERVICE_URL`）。
+网关：`/api/auth/*` → auth-service；`/api/paypal/*` → payments-admin-service。
 
 ## 本地启动
 
 ```bash
-# 1) API
+# 1) API（JWT_SECRET = auth-service 的 JWT_SECRET）
 cd payments/api/services/payments-admin-service
-cp .env.example .env   # 填入 PAYPAL_CLIENT_ID / SECRET（PayPal 渠道）
+cp .env.example .env
 npm run dev            # :3025
 
 # 2) Web
 cd payments/web
+cp .env.example .env   # VITE_STANDALONE_AUTH=Y 可本页账号密码登录
 pnpm install
 pnpm dev               # :9713
 ```
 
-PayPal App Return URL 须为：`http://127.0.0.1:3025/api/callback`。
+PayPal App Return URL：`http://127.0.0.1:3025/api/callback`。
 
-浏览器打开 `http://127.0.0.1:9713`，会跳到 Logto 登录。角色仍在 IAM 里分配，本服务只保存收款业务数据。
+## Identity / 工作台 SSO
 
-## Identity 接入
+1. Portal：`VITE_WORKBENCH_APP_CODES` 含 `paypal`；`VITE_SUBAPP_DEPLOYMENTS.paypal.origin=http://127.0.0.1:9713`
+2. auth-service：`TARGET_APPS` 含 `paypal`
+3. 菜单 / 权限：`app_code=paypal`
+4. 从工作台打开本应用 → `/sso?ticket=…`
 
-1. Migration：工作台应用 `payments`（历史补丁可能仍写 `paypal`）
-2. Portal：`VITE_WORKBENCH_APP_CODES` 含 `payments`；`VITE_SUBAPP_DEPLOYMENTS.payments.origin=http://127.0.0.1:9713`
-3. auth-service：`WORKBENCH_APP_CODES` 含 `payments`；SSO `targetApp` 支持 `payments`
-4. 用户 / 角色 / 菜单：Portal「平台管理」；本应用菜单 `app_code=payments`，权限码如 `payments:account:assign`
+## PayPal 授权方案
 
-## 渠道与授权
+见 [docs/01-商家登录授权.md](docs/01-商家登录授权.md)。
 
-- **PayPal**（已实现）：商家登录授权，见 [docs/01-商家登录授权.md](docs/01-商家登录授权.md)
-- 其它收款渠道：按同一「账号 → 授权/凭证 → 同步流水/争议」模型扩展
+## 部署（宝塔 bt-node）
+
+密钥：`payments/bt-node.ouyiuri.com_id_ed25519`  
+域名：管理端 `https://payments.ouyishop.com` · 接口 `https://payments-api.ouyishop.com`（反代本机 `:3025`）
+
+```bash
+cd payments
+# Cloudflare 橙云导致 SSH 超时时报：DEPLOY_HOST=root@<源站IP>
+./scripts/deploy.sh          # web + api
+./scripts/deploy.sh web
+./scripts/deploy.sh api
+# 首次可上传本地 API .env（含密钥，慎用）
+UPLOAD_ENV=1 ./scripts/deploy.sh api
+```
+
+宝塔先建好两个站点并开 SSL；脚本会写 Nginx extension 并 PM2 托管 `payments-admin-service`。

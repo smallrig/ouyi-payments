@@ -11,9 +11,15 @@ importers:
       '@iconify/vue':
         specifier: 5.0.0
         version: 5.0.0(vue@3.5.26(typescript@5.9.3))
-      '@logto/browser':
-        specifier: ^3.1.0
-        version: 3.1.0
+      '@oy/admin-auth-sdk':
+        specifier: workspace:*
+        version: link:../../design/web/packages/admin-auth-sdk
+      '@oy/admin-config':
+        specifier: workspace:*
+        version: link:../../design/web/packages/admin-config
+      '@oy/admin-kit':
+        specifier: workspace:*
+        version: link:../../design/web/packages/admin-kit
       naive-ui:
         specifier: 2.43.2
         version: 2.43.2(vue@3.5.26(typescript@5.9.3))
@@ -346,15 +352,6 @@ packages:
   '@juggle/resize-observer@3.4.0':
     resolution: {integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==}
 
-  '@logto/browser@3.1.0':
-    resolution: {integrity: sha512-Ux4EaTK19svxh4emFFpdzsBD6D7fF2R6EY8F/9az6BE5kEZIiLVR+EUUzebnILHB2fPkHDSQyGk6sasPkm6jqw==}
-
-  '@logto/client@3.2.0':
-    resolution: {integrity: sha512-z9WzXHXAifqrWq3co512nfsNHBCskuwVeQ3CER4HUFqTjt7dvjCXDpSJSy1AmjeevdRGv1D0OTv4zPcff0yfCw==}
-
-  '@logto/js@6.1.2':
-    resolution: {integrity: sha512-YB/TfixPGI0Spbs8LXiKuASOKFUE9VmlTkXiPfgg3UXQsIPTU71KjKxEXZRePu3xdPNhsZ6WtnRfRvvcpP+KGQ==}
-
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     resolution: {integrity: sha512-oTXEIha4SsuXdTA4Iyskj0kpdx2yVXdhd75c2v3xGrHFfVMsbhTPZU/nMPL4sWKo4pBHm3aucLaqGlF696dTyQ==}
     engines: {node: ^22.20 || ^24.12 || >=25}
@@ -503,10 +500,6 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@silverhand/essentials@2.9.3':
-    resolution: {integrity: sha512-OM9pyGc/yYJMVQw+fFOZZaTHXDWc45sprj+ky+QjC9inhf5w51L1WBmzAwFuYkHAwO1M19fxVf2sTH9KKP48yg==}
-    engines: {node: '>=18.12.0', pnpm: ^10.0.0}
-
   '@types/crypto-js@4.2.2':
     resolution: {integrity: sha512-sDOLlVbHhXpAUAL0YHDUUwDZf3iN4Bwi4W6a0W0b+QcAezUbRtH4FVb+9J4h+XFPW7l/gQ9F8qC7P+Ec4k8QVQ==}
 
@@ -629,14 +622,6 @@ packages:
   call-bound@1.0.4:
     resolution: {integrity: sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg==}
     engines: {node: '>= 0.4'}
-
-  camelcase-keys@9.1.3:
-    resolution: {integrity: sha512-Rircqi9ch8AnZscQcsA1C47NFdaO3wukpmIRzYcDOrmvgt78hM/sj5pZhZNec2NM12uk5vTwRHZ4anGcrC4ZTg==}
-    engines: {node: '>=16'}
-
-  camelcase@8.0.0:
-    resolution: {integrity: sha512-8WB3Jcas3swSvjIeA2yvCJ+Miyz5l1ZmB6HFb9R1317dt9LCQoswg/BGrmAmkWVEszSrrg4RwmO46qIm2OEnSA==}
-    engines: {node: '>=16'}
 
   colord@2.9.3:
     resolution: {integrity: sha512-jeC1axXpnb0/2nn/Y1LPuLdgXBLH7aDcHu4KEKfqw3CUhX7ZpfBSlPKyqXE6btIgEzfWtrX3/tyBCaCvXvMkOw==}
@@ -777,12 +762,6 @@ packages:
     resolution: {integrity: sha512-XVm7LOeLpTW4jV19QSH38vkswxoLud8sQ57YwJVTPWdiaI9I8keEhGFpBlslyVsgdQy4Opg8QOLb8YRgsyZiQg==}
     engines: {node: '>=10'}
 
-  jose@5.10.0:
-    resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
-
-  js-base64@3.9.4:
-    resolution: {integrity: sha512-PtOMXpEGuP0RRiRXsjzHzl44dMHxSu2CPvAhinupR1tBa88me+1DPqsobl7eupn5UukjLkln1ZnAOAOXOrYG0Q==}
-
   klona@2.0.6:
     resolution: {integrity: sha512-dhG34DXATL5hSxJbIexCft8FChFXtmskoZYnoPWjXQuebWYCNkVeV3KkGegCK9CP1oswI/vQibS2GY7Em/sJJA==}
     engines: {node: '>= 8'}
@@ -801,10 +780,6 @@ packages:
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
-
-  map-obj@5.0.0:
-    resolution: {integrity: sha512-2L3MIgJynYrZ3TYMriLDLWocz15okFakV6J12HXvMXDHui2x/zgChzg1u9mFFGbbGWE+GsLpQByt4POb9Or+uA==}
-    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -876,10 +851,6 @@ packages:
     resolution: {integrity: sha512-YWWTjgABSKcvs/nWBi9PycY/JiPJqOD4JA6o9Sej2AtvSGarXxKC3OQSk4pAarbdQlKAh5D4FCQkJNkW+GAn3w==}
     engines: {node: '>=0.6'}
 
-  quick-lru@6.1.2:
-    resolution: {integrity: sha512-AAFUA5O1d83pIHEhJwWCq/RQcRukCkn/NSm2QsTEMle5f2hP0ChI2+3Xb051PZCkLryI/Ir1MVKviT2FIloaTQ==}
-    engines: {node: '>=12'}
-
   rfdc@1.4.1:
     resolution: {integrity: sha512-q1b3N5QkRUWUl7iyylaaj3kOpIT0N2i9MqIEQXP73GVsN9cw3fdx8X63cEmWhJGi2PPCF23Ijp7ktmd39rawIA==}
 
@@ -925,10 +896,6 @@ packages:
 
   treemate@0.3.11:
     resolution: {integrity: sha512-M8RGFoKtZ8dF+iwJfAJTOH/SM4KluKOKRJpjCMhI8bG3qB74zrFoArKZ62ll0Fr3mqkMJiQOmWYkdYgDeITYQg==}
-
-  type-fest@4.41.0:
-    resolution: {integrity: sha512-TeTSQ6H5YHvpqVwBRcnLDCBnDOHWYu7IvGbHT6N8AOymcr9PJGjc1GTtiWZTYg0NCgYwvnYWEkVChQAr9bjfwA==}
-    engines: {node: '>=16'}
 
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
@@ -1129,24 +1096,6 @@ snapshots:
 
   '@juggle/resize-observer@3.4.0': {}
 
-  '@logto/browser@3.1.0':
-    dependencies:
-      '@logto/client': 3.2.0
-      '@silverhand/essentials': 2.9.3
-      js-base64: 3.9.4
-
-  '@logto/client@3.2.0':
-    dependencies:
-      '@logto/js': 6.1.2
-      '@silverhand/essentials': 2.9.3
-      camelcase-keys: 9.1.3
-      jose: 5.10.0
-
-  '@logto/js@6.1.2':
-    dependencies:
-      '@silverhand/essentials': 2.9.3
-      camelcase-keys: 9.1.3
-
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
@@ -1226,8 +1175,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.64.6':
     optional: true
-
-  '@silverhand/essentials@2.9.3': {}
 
   '@types/crypto-js@4.2.2': {}
 
@@ -1397,15 +1344,6 @@ snapshots:
       call-bind-apply-helpers: 1.0.2
       get-intrinsic: 1.3.0
 
-  camelcase-keys@9.1.3:
-    dependencies:
-      camelcase: 8.0.0
-      map-obj: 5.0.0
-      quick-lru: 6.1.2
-      type-fest: 4.41.0
-
-  camelcase@8.0.0: {}
-
   colord@2.9.3: {}
 
   combined-stream@1.0.8:
@@ -1546,10 +1484,6 @@ snapshots:
 
   is-retry-allowed@2.2.0: {}
 
-  jose@5.10.0: {}
-
-  js-base64@3.9.4: {}
-
   klona@2.0.6: {}
 
   lie@3.1.1:
@@ -1567,8 +1501,6 @@ snapshots:
   magic-string@0.30.21:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.6.0
-
-  map-obj@5.0.0: {}
 
   math-intrinsics@1.1.0: {}
 
@@ -1637,8 +1569,6 @@ snapshots:
   qs@6.14.0:
     dependencies:
       side-channel: 1.1.1
-
-  quick-lru@6.1.2: {}
 
   rfdc@1.4.1: {}
 
@@ -1718,8 +1648,6 @@ snapshots:
       picomatch: 4.0.7
 
   treemate@0.3.11: {}
-
-  type-fest@4.41.0: {}
 
   typescript@5.9.3: {}
 

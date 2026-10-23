@@ -3,14 +3,21 @@ import { useAuthStore } from '@/store/auth';
 
 export function setupAuthGuards(router: Router) {
   router.beforeEach(async to => {
-    if (to.meta.public) return true;
-
-    const requiresAuth = to.meta.requiresAuth !== false;
-    if (!requiresAuth) return true;
-
     const auth = useAuthStore();
-    const ok = await auth.ensureSession();
-    if (!ok) return { name: 'login', query: { redirect: to.fullPath } };
+    if (to.meta.public) return true;
+    auth.syncTokenFromStorage();
+    if (!auth.token) return { name: 'login', query: { redirect: to.fullPath } };
+    if (!auth.user) {
+      try {
+        await auth.fetchProfile();
+      } catch {
+        auth.token = '';
+        auth.user = null;
+        auth.persist();
+        return { name: 'login', query: { redirect: to.fullPath } };
+      }
+    }
+    if (!auth.user) return { name: 'login', query: { redirect: to.fullPath } };
     return true;
   });
 }

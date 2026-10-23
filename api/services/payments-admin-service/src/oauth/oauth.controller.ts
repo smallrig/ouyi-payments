@@ -48,9 +48,18 @@ export class OauthController {
     if (query.error) return fail(query.error_description || query.error);
     if (!query.code) return fail('回调里没有 authorization code');
     try {
-      const { profileError } = await this.paypal.exchangeAuthorizationCode(query.code, expected.linkPayerId || '');
-      const suffix = profileError ? `&profile=${encodeURIComponent(profileError.slice(0, 180))}` : '';
-      res.redirect(`${config.frontendUrl}/accounts?auth=ok${suffix}`);
+      const { record, profileError } = await this.paypal.exchangeAuthorizationCode(
+        query.code,
+        expected.linkPayerId || '',
+      );
+      const next = new URL(`${config.frontendUrl}/accounts`);
+      next.searchParams.set('auth', 'ok');
+      if (record?.payerId) next.searchParams.set('payerId', record.payerId);
+      if (record?.email) next.searchParams.set('email', record.email);
+      if (record?.name) next.searchParams.set('name', record.name);
+      if (record?.status) next.searchParams.set('status', record.status);
+      if (profileError) next.searchParams.set('profile', profileError.slice(0, 180));
+      res.redirect(next.toString());
     } catch (error) {
       const message = error instanceof PayPalError ? error.message : '兑换令牌失败';
       fail(message);

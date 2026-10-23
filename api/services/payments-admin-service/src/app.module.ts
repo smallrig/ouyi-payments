@@ -11,6 +11,8 @@ import { TransactionEntity } from './entities/transaction.entity';
 import { ApiLogEntity } from './entities/api-log.entity';
 import { ProductImageEntity } from './entities/product-image.entity';
 import { OauthSessionEntity } from './entities/oauth-session.entity';
+import { SyncTaskEntity } from './entities/sync-task.entity';
+import { SyncLogEntity } from './entities/sync-log.entity';
 import { ApiLogInterceptor } from './common/api-log.interceptor';
 import { AccountService } from './account/account.service';
 import { AccountController } from './account/account.controller';
@@ -20,12 +22,14 @@ import { OauthSessionService } from './oauth/oauth-session.service';
 import { OauthController } from './oauth/oauth.controller';
 import { RecordsService } from './records/records.service';
 import { RecordsController } from './records/records.controller';
+import { SyncService } from './sync/sync.service';
+import { SyncController } from './sync/sync.controller';
+import { SyncScheduler } from './sync/sync.scheduler';
 import { AuthGuard } from './common/auth.guard';
 import { AllExceptionsFilter } from './common/all-exceptions.filter';
-import { OidcSessionController } from './auth/oidc-session.controller';
-import { OidcSessionService } from './auth/oidc-session.service';
+import { LocalAuthController } from './auth/local-auth.controller';
 
-/** 本库只放 PayPal 管理数据，表结构由实体上的 comment 同步成中文注释。 */
+/** 本库只放收款业务数据，表结构由实体上的 comment 同步成中文注释。 */
 const entities = [
   PayPalAccountEntity,
   TransactionCacheEntity,
@@ -36,11 +40,13 @@ const entities = [
   ApiLogEntity,
   ProductImageEntity,
   OauthSessionEntity,
+  SyncTaskEntity,
+  SyncLogEntity,
 ];
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env'] }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -56,14 +62,15 @@ const entities = [
     }),
     TypeOrmModule.forFeature(entities),
   ],
-  controllers: [AccountController, OauthController, RecordsController, OidcSessionController],
+  controllers: [AccountController, OauthController, RecordsController, LocalAuthController, SyncController],
   providers: [
     AccountService,
-    OidcSessionService,
     PaypalClient,
     CartImagesService,
     OauthSessionService,
     RecordsService,
+    SyncService,
+    SyncScheduler,
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_INTERCEPTOR, useClass: ApiLogInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },

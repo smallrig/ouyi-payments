@@ -2,36 +2,55 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NButton } from 'naive-ui';
+import { NButton, NCheckbox, NInput, useMessage } from 'naive-ui';
 import { useAuthStore } from '@/store/auth';
 
 const auth = useAuthStore();
 const router = useRouter();
 const route = useRoute();
-const error = ref('');
-const pending = ref(false);
+const message = useMessage();
 
-function redirectTarget() {
-  const value = String(route.query.redirect || '/');
-  if (!value.startsWith('/') || value.startsWith('//')) return '/';
-  return value;
-}
+const username = ref('');
+const password = ref('');
+const remember = ref(true);
+const portalUrl = (import.meta.env.VITE_PORTAL_URL || '').replace(/\/$/, '');
+const appTitle = import.meta.env.VITE_APP_TITLE || 'Payments · 收款管理';
 
-async function startLogin() {
-  error.value = '';
-  pending.value = true;
+async function handleLogin() {
+  if (!username.value || !password.value) {
+    message.warning('请输入账号和密码');
+    return;
+  }
   try {
-    await auth.signIn(redirectTarget());
+    await auth.login(username.value, password.value);
+    const redirect = (route.query.redirect as string) || '/';
+    await router.replace(redirect);
   } catch (err) {
-    pending.value = false;
-    error.value = err instanceof Error ? err.message : '无法打开登录页';
+    message.error(err instanceof Error ? err.message : '登录失败');
   }
 }
 
+function onForgot() {
+  if (portalUrl) {
+    window.open(portalUrl, '_blank', 'noopener');
+    return;
+  }
+  message.info('请联系管理员重置密码');
+}
+
+function onRegister() {
+  if (portalUrl) {
+    window.open(portalUrl, '_blank', 'noopener');
+    return;
+  }
+  message.info('请通过 Portal 申请账号');
+}
+
 onMounted(async () => {
-  const ok = await auth.ensureSession();
-  if (ok) await router.replace(redirectTarget());
-  else if (auth.lastError) error.value = auth.lastError;
+  if (auth.isLogin) {
+    await auth.fetchProfile().catch(() => null);
+    if (auth.user) await router.replace('/');
+  }
 });
 </script>
 
@@ -54,22 +73,84 @@ onMounted(async () => {
           </span>
           <span class="login__pp-word">Payments</span>
         </div>
-          <p class="login__sub">统一管理收款账号，查看交易流水与客户争议</p>
+        <h1 class="login__title">{{ appTitle }}</h1>
+        <p class="login__sub">统一管理收款账号，查看交易流水与客户争议</p>
       </div>
 
-      <p v-if="error" class="login__hint login__hint--error">{{ error }}</p>
-      <p v-else class="login__hint">点击按钮前往统一账号登录</p>
-      <NButton
-        type="primary"
-        size="large"
-        block
-        strong
-        class="login__submit"
-        :loading="pending"
-        @click="startLogin"
-      >
-        前往登录
-      </NButton>
+      <template v-if="auth.standaloneAuthEnabled">
+        <form class="login__form" @submit.prevent="handleLogin">
+          <div class="field">
+            <NInput
+              v-model:value="username"
+              size="large"
+              placeholder="请输入账号"
+              autocomplete="username"
+              class="field__input"
+            >
+              <template #prefix>
+                <Icon icon="mdi:account-outline" width="18" class="field__icon" />
+              </template>
+            </NInput>
+          </div>
+          <div class="field">
+            <NInput
+              v-model:value="password"
+              size="large"
+              type="password"
+              show-password-on="click"
+              placeholder="请输入密码"
+              autocomplete="current-password"
+              class="field__input"
+              @keyup.enter="handleLogin"
+            >
+              <template #prefix>
+                <Icon icon="mdi:lock-outline" width="18" class="field__icon" />
+              </template>
+            </NInput>
+          </div>
+
+          <div class="login__row">
+            <NCheckbox v-model:checked="remember">记住登录状态</NCheckbox>
+            <button type="button" class="login__link" @click="onForgot">忘记密码？</button>
+          </div>
+
+          <NButton
+            type="primary"
+            size="large"
+            block
+            strong
+            attr-type="submit"
+            :loading="auth.loginLoading"
+            class="login__submit"
+          >
+            登录
+          </NButton>
+        </form>
+
+        <p class="login__foot">
+          没有账号？
+          <button type="button" class="login__link" @click="onRegister">立即注册</button>
+        </p>
+      </template>
+
+      <template v-else>
+        <p class="login__hint">请从统一 Portal 进入本系统，或使用 SSO 链接（/sso?ticket=…）。</p>
+        <NButton
+          v-if="portalUrl"
+          type="primary"
+          size="large"
+          block
+          strong
+          tag="a"
+          :href="portalUrl"
+          class="login__submit"
+        >
+          打开 Portal
+        </NButton>
+        <p v-if="portalUrl" class="login__foot">
+          <a :href="portalUrl" target="_blank" rel="noopener" class="login__link">返回 Portal</a>
+        </p>
+      </template>
     </div>
   </div>
 </template>
@@ -190,6 +271,14 @@ onMounted(async () => {
   color: #003087;
 }
 
+.login__title {
+  margin: 0 0 8px;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #1a2332;
+}
+
 .login__sub {
   margin: 0;
   font-size: 0.84rem;
@@ -253,13 +342,13 @@ onMounted(async () => {
   text-align: center;
 }
 
-.login__hint--error {
-  color: #b42318;
-}
-
 @media (max-width: 480px) {
   .login__card {
     padding: 28px 20px 24px;
+  }
+
+  .login__title {
+    font-size: 1.15rem;
   }
 }
 </style>

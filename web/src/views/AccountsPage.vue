@@ -7,10 +7,11 @@ import {
   NInput,
   NPagination,
   NSelect,
-  NSpin,
   useMessage
 } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
+import PpPageHero from '@/components/PpPageHero.vue';
 import { useClientPagination } from '@/composables/useClientPagination';
 import {
   fetchAccounts,
@@ -21,13 +22,13 @@ import {
 import type { PayPalAccount } from '@/api/types';
 import { accountStatusLabel } from '@/lib/account-status';
 import { formatDateTime, formatMoney } from '@/lib/format';
-import { startPayPalOAuth } from '@/lib/oauth';
+import { oauthAccountsRefreshTick, oauthDeferListLoad, startPayPalOAuth } from '@/lib/oauth';
 
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
 
-const loading = ref(false);
+const loading = ref(true);
 const syncingId = ref('');
 const accounts = ref<PayPalAccount[]>([]);
 const keyword = ref('');
@@ -79,6 +80,13 @@ const stats = computed(() => {
     frozen: list.filter(a => a.status === 'frozen').length
   };
 });
+
+const heroMetrics = computed(() => [
+  { label: '全部账号', value: stats.value.total },
+  { label: '已授权', value: stats.value.authorized },
+  { label: '待授权', value: stats.value.pending },
+  { label: '冻结', value: stats.value.frozen }
+]);
 
 function statusTone(status: string) {
   if (status === 'active') return 'ok';
@@ -192,58 +200,31 @@ async function confirmRevoke() {
   }
 }
 
-async function handleAuthQuery() {
-  const auth = route.query.auth;
-  if (auth === 'ok') {
-    message.success('PayPal 授权成功');
-    await router.replace({ query: {} });
-    await load();
-  } else if (auth === 'error') {
-    message.error(String(route.query.detail || '授权失败'));
-    await router.replace({ query: {} });
-  }
-}
-
 onMounted(() => {
+  if (oauthDeferListLoad.value || route.query.auth === 'ok') return;
   void load();
-  void handleAuthQuery();
 });
 
-watch(() => route.query.auth, () => void handleAuthQuery());
+watch(oauthAccountsRefreshTick, () => void load());
 watch([keyword, statusFilter], () => resetPage());
 </script>
 
 <template>
   <div class="pp-page">
-    <div class="pp-page-head">
-      <div>
-        <h1 class="pp-page-title">收款账号管理</h1>
-        <p class="pp-page-desc">绑定收款账号，分配负责人，同步账单与查单（当前支持 PayPal）</p>
-      </div>
-      <NButton type="primary" @click="startPayPalOAuth()">
-        <template #icon><Icon icon="mdi:paypal" width="16" /></template>
-        绑定账号
-      </NButton>
-    </div>
-
-    <div class="stats">
-      <div class="stats__item">
-        <span class="stats__ico"><Icon icon="mdi:wallet-outline" width="18" /></span>
-        <div><b>{{ stats.total }}</b><span>全部账号</span></div>
-      </div>
-      <div class="stats__item is-ok">
-        <span class="stats__ico"><Icon icon="mdi:check-decagram-outline" width="18" /></span>
-        <div><b>{{ stats.authorized }}</b><span>已授权</span></div>
-      </div>
-      <div class="stats__item is-warn">
-        <span class="stats__ico"><Icon icon="mdi:clock-outline" width="18" /></span>
-        <div><b>{{ stats.pending }}</b><span>待授权</span></div>
-      </div>
-      <div class="stats__item is-bad">
-        <span class="stats__ico"><Icon icon="mdi:snowflake" width="18" /></span>
-        <div><b>{{ stats.frozen }}</b><span>冻结</span></div>
-      </div>
-    </div>
+    <PpPageHero
+      icon="mdi:wallet-outline"
+      kicker="收款接入"
+      title="收款账号"
+      description="绑定收款账号，分配负责人，同步账单与查单。当前支持 PayPal。"
+      :metrics="heroMetrics"
+    >
+      <template #actions>
+        <NButton type="primary" @click="startPayPalOAuth()">
+          <template #icon><Icon icon="mdi:paypal" width="16" /></template>
+          绑定账号
+        </NButton>
+      </template>
+    </PpPageHero>
 
     <div class="pp-filter">
         <div class="pp-filter__field">
@@ -268,10 +249,15 @@ watch([keyword, statusFilter], () => resetPage());
         <NButton quaternary @click="clearFilters">重置</NButton>
       </div>
 
-    <NSpin :show="loading">
+    <PpAsyncPane
+      :loading="loading"
+      icon="mdi:account-multiple-outline"
+      title="加载账号"
+      description="正在获取商家收款账号…"
+    >
       <div class="pp-table-wrap">
         <PpEmptyState
-          v-if="!loading && !accounts.length"
+          v-if="!accounts.length"
           icon="mdi:account-multiple-outline"
           title="尚未绑定商家账号"
           description="使用商家登录授权接入沙箱或生产账号。"
@@ -282,7 +268,7 @@ watch([keyword, statusFilter], () => resetPage());
         </PpEmptyState>
 
         <PpEmptyState
-          v-else-if="!loading && !filtered.length"
+          v-else-if="!filtered.length"
           compact
           icon="mdi:filter-remove-outline"
           title="没有匹配的账号"
@@ -293,7 +279,7 @@ watch([keyword, statusFilter], () => resetPage());
           </template>
         </PpEmptyState>
 
-        <template v-else-if="filtered.length">
+        <template v-else>
           <table class="pp-table">
             <thead>
               <tr>
@@ -404,7 +390,7 @@ watch([keyword, statusFilter], () => resetPage());
           </div>
         </template>
       </div>
-    </NSpin>
+    </PpAsyncPane>
 
     <!-- 分配负责人 -->
     <Teleport to="body">
@@ -687,63 +673,6 @@ watch([keyword, statusFilter], () => resetPage());
 </template>
 
 <style scoped>
-.stats {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.stats__item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: #fff;
-  border: 1px solid var(--pp-border);
-  border-radius: var(--pp-radius);
-  box-shadow: var(--pp-shadow);
-}
-
-.stats__ico {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  border-radius: 10px;
-  color: #003087;
-  background: #e7f0fb;
-}
-
-.stats__item.is-ok .stats__ico {
-  color: #15803d;
-  background: #e8f7ee;
-}
-
-.stats__item.is-warn .stats__ico {
-  color: #b45309;
-  background: #fff4e5;
-}
-
-.stats__item.is-bad .stats__ico {
-  color: #b42318;
-  background: #fdecec;
-}
-
-.stats__item b {
-  display: block;
-  font-size: 1.35rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-
-.stats__item span {
-  font-size: 0.75rem;
-  color: var(--pp-muted);
-}
-
 .search {
   position: relative;
 }
@@ -1594,11 +1523,5 @@ watch([keyword, statusFilter], () => resetPage());
 .pp-mask-leave-to .sheet {
   opacity: 0;
   transform: translateY(10px) scale(0.98);
-}
-
-@media (max-width: 720px) {
-  .stats {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 </style>

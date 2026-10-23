@@ -13,9 +13,9 @@ export const router = createRouter({
       meta: { public: true }
     },
     {
-      path: '/callback',
-      name: 'callback',
-      component: () => import('@/views/CallbackPage.vue'),
+      path: '/sso',
+      name: 'sso',
+      component: () => import('@/views/SsoPage.vue'),
       meta: { public: true }
     },
     {
@@ -48,16 +48,34 @@ export const router = createRouter({
           meta: { requiresAuth: true, title: '账单' }
         },
         {
+          path: 'complaints',
+          name: 'complaints',
+          component: () => import('@/views/DisputesPage.vue'),
+          meta: { requiresAuth: true, title: '客户投诉', caseTab: 'complaints' }
+        },
+        {
           path: 'disputes',
           name: 'disputes',
           component: () => import('@/views/DisputesPage.vue'),
-          meta: { requiresAuth: true, title: '争议案件' }
+          meta: { requiresAuth: true, title: '争议案件', caseTab: 'disputes' }
         },
         {
           path: 'disputes/:id',
           name: 'dispute-detail',
           component: () => import('@/views/DisputeDetailPage.vue'),
           meta: { requiresAuth: true, title: '案件详情' }
+        },
+        {
+          path: 'reports',
+          name: 'reports',
+          component: () => import('@/views/ReportsPage.vue'),
+          meta: { requiresAuth: true, title: '数据报表' }
+        },
+        {
+          path: 'sync',
+          name: 'sync-tasks',
+          component: () => import('@/views/SyncTasksPage.vue'),
+          meta: { requiresAuth: true, title: '同步任务' }
         }
       ]
     },

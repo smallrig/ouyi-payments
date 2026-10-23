@@ -1,81 +1,52 @@
 import { defineStore } from 'pinia';
 import { paypalFetch } from '@/api/http';
-import { logto, logtoCallbackUrl, logtoResource } from '@/lib/logto';
 
-const TOKEN_KEY = 'paypal.access_token';
-const USER_KEY = 'paypal.user';
-const REDIRECT_KEY = 'paypal.post_login_redirect';
+const TOKEN_KEY = 'payments.access_token';
+const USER_KEY = 'payments.user';
 
-export type SessionUser = {
+export type LocalUser = {
   id: string;
   username: string;
-  email: string;
-  phone: string;
-  avatar: string;
-  platformAccess: Record<string, string>;
-  permissions: string[];
+  nickname?: string;
+  roles?: string[];
+  permissions?: string[];
 };
 
-type SessionResponse = {
-  code: number;
+type LoginResponse = {
+  code?: number;
   data?: {
+    token?: string;
     access_token?: string;
-    user?: SessionUser;
+    user?: LocalUser;
   };
+  token?: string;
+  user?: LocalUser;
+  error?: string;
 };
 
-function platformId() {
-  return import.meta.env.VITE_PLATFORM_ID || 'paypal';
-}
-
-function readStoredUser(): SessionUser | null {
+function readUser(): LocalUser | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as SessionUser;
+    return JSON.parse(raw) as LocalUser;
   } catch {
     return null;
   }
 }
 
-function tokenExpired(token: string) {
-  try {
-    const part = token.split('.')[1] || '';
-    const json = atob(part.replace(/-/g, '+').replace(/_/g, '/'));
-    const payload = JSON.parse(json) as { exp?: number };
-    if (!payload.exp) return false;
-    return payload.exp * 1000 < Date.now() + 30_000;
-  } catch {
-    return true;
-  }
-}
-
-export function takePostLoginRedirect() {
-  const value = sessionStorage.getItem(REDIRECT_KEY) || '/';
-  sessionStorage.removeItem(REDIRECT_KEY);
-  if (!value.startsWith('/') || value.startsWith('//')) return '/';
-  return value;
-}
-
-export function rememberPostLoginRedirect(path: string) {
-  if (!path.startsWith('/') || path.startsWith('//')) return;
-  sessionStorage.setItem(REDIRECT_KEY, path);
-}
-
 export const useAuthStore = defineStore('auth', {
   state: () => ({
     token: localStorage.getItem(TOKEN_KEY) || '',
-    user: readStoredUser() as SessionUser | null,
-    lastError: ''
+    user: readUser() as LocalUser | null,
+    permissions: [] as string[],
+    permissionsLoaded: false,
+    loginLoading: false
   }),
   getters: {
     isLogin: state => Boolean(state.token && state.user),
-    displayName: state => state.user?.username || state.user?.email || '操作员',
-    platformRole: state => state.user?.platformAccess?.[platformId()] || '',
-    hasPlatformAccess(): boolean {
-      const role = this.platformRole;
-      return role === 'admin' || role === 'user';
-    }
+    displayName: state => state.user?.nickname || state.user?.username || '操作员',
+    /** 始终允许本页账号密码（写死配置登录） */
+    standaloneAuthEnabled: () => true
   },
   actions: {
     persist() {
@@ -84,63 +55,77 @@ export const useAuthStore = defineStore('auth', {
       if (this.user) localStorage.setItem(USER_KEY, JSON.stringify(this.user));
       else localStorage.removeItem(USER_KEY);
     },
-    clearLocal() {
-      this.token = '';
-      this.user = null;
-      this.persist();
+    syncTokenFromStorage() {
+      this.token = localStorage.getItem(TOKEN_KEY) || '';
+      this.user = readUser();
     },
-    async exchangeFromLogto() {
-      this.lastError = '';
-      const accessToken = await logto.getAccessToken(logtoResource);
-      const idToken = await logto.getIdToken();
-      if (!accessToken || !idToken) {
-        this.clearLocal();
-        this.lastError = '没有取到登录令牌';
-        return false;
-      }
+    async login(username: string, password: string) {
+      this.loginLoading = true;
       try {
-        const body = await paypalFetch<SessionResponse>('/auth/oidc/session', {
+        const body = await paypalFetch<LoginResponse>('/auth/login', {
           method: 'POST',
           skipAuth: true,
-          headers: { Authorization: `Bearer ${accessToken}` },
-          body: JSON.stringify({ idToken })
+          body: JSON.stringify({ username, password })
         });
-        const token = body.data?.access_token || '';
-        const user = body.data?.user;
-        const role = user?.platformAccess?.[platformId()] || '';
-        if (!token || !user || (role !== 'admin' && role !== 'user')) {
-          this.clearLocal();
-          this.lastError = `没有 ${platformId()} 的访问权限`;
-          return false;
+        const token = body.data?.token || body.data?.access_token || body.token || '';
+        const user = body.data?.user || body.user;
+        if (!token || !user) {
+          throw new Error(body.error || '登录失败');
         }
         this.token = token;
         this.user = user;
+        this.permissions = user.permissions || [];
+        this.permissionsLoaded = true;
         this.persist();
-        return true;
-      } catch (err) {
-        this.clearLocal();
-        this.lastError = err instanceof Error ? err.message : '登录失败';
+      } finally {
+        this.loginLoading = false;
+      }
+    },
+    async loginByToken(token: string) {
+      if (!token) return false;
+      this.token = token;
+      this.persist();
+      try {
+        await this.fetchProfile();
+        return Boolean(this.user);
+      } catch {
+        this.token = '';
+        this.user = null;
+        this.persist();
         return false;
       }
     },
-    /** 本地 JWT 还在就直接用；丢掉用户信息但 Logto 仍登录时，重新换发。 */
-    async ensureSession() {
-      if (this.token && this.user && !tokenExpired(this.token) && this.hasPlatformAccess) return true;
-      if (!(await logto.isAuthenticated())) {
-        this.clearLocal();
-        return false;
+    async fetchProfile() {
+      if (!this.token) return null;
+      const body = await paypalFetch<{ code?: number; data?: LocalUser } & LocalUser>('/auth/me');
+      const user = (body as { data?: LocalUser }).data || (body as LocalUser);
+      if (!user?.id && !user?.username) {
+        throw new Error('无效会话');
       }
-      return this.exchangeFromLogto();
+      this.user = {
+        id: String(user.id || 'local-admin'),
+        username: String(user.username || 'admin'),
+        nickname: user.nickname || '管理员',
+        roles: user.roles || ['admin'],
+        permissions: user.permissions || []
+      };
+      this.permissions = this.user.permissions || [];
+      this.permissionsLoaded = true;
+      this.persist();
+      return this.user;
     },
-    async signIn(redirect = '/') {
-      rememberPostLoginRedirect(redirect);
-      await logto.signIn(logtoCallbackUrl());
+    async fetchPermissions() {
+      return this.permissions;
     },
     async logout() {
-      this.clearLocal();
-      const base = import.meta.env.VITE_BASE_URL || '/';
-      const back = new URL('login', `${location.origin}${base.startsWith('/') ? base : `/${base}`}`).href;
-      await logto.signOut(back);
+      this.token = '';
+      this.user = null;
+      this.permissions = [];
+      this.permissionsLoaded = false;
+      this.persist();
+    },
+    async exchangeSso(_ticket: string) {
+      throw new Error('当前为本地账号登录，不支持 SSO ticket');
     }
   }
 });

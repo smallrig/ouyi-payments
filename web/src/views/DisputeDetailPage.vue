@@ -2,11 +2,23 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NButton, NModal, NSpin, useMessage } from 'naive-ui';
+import { NButton, NModal, useMessage } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
-import { actOnDispute, fetchDispute, provideEvidence } from '@/api/paypal';
+import { actOnDispute, fetchDispute, provideEvidence, sendDisputeMessage, sendSupportingInfo } from '@/api/paypal';
 import type { DisputeItem } from '@/api/types';
-import { evidenceLabel, reasonLabel, stageLabel } from '@/lib/dispute';
+import {
+  canDoAction,
+  caseKindLabel,
+  defaultEvidenceType,
+  evidenceLabel,
+  isComplaint,
+  needsSellerResponse,
+  reasonLabel,
+  recommendedEvidenceTypes,
+  stageLabel,
+  type DisputeAction
+} from '@/lib/dispute';
 import { formatDateTime } from '@/lib/format';
 
 const route = useRoute();
@@ -17,12 +29,27 @@ const loading = ref(true);
 const acting = ref(false);
 const dispute = ref<DisputeItem | null>(null);
 const tab = ref<'progress' | 'tx' | 'records' | 'files'>('progress');
-const dialog = ref<'message' | 'evidence' | 'outcome' | null>(null);
+const dialog = ref<
+  'message' | 'evidence' | 'outcome' | 'escalate' | 'appeal' | 'acknowledge' | 'supporting' | null
+>(null);
 const messageText = ref('');
 const evidenceNote = ref('');
 const trackingNumber = ref('');
+const carrierName = ref('');
+const evidenceType = ref('PROOF_OF_FULFILLMENT');
+const offerAmount = ref('');
+const offerNote = ref('卖家提议退款');
+const escalateNote = ref('');
+const appealNote = ref('');
+const acknowledgeNote = ref('');
+const acknowledgeType = ref<'ITEM_RECEIVED' | 'ITEM_NOT_RECEIVED' | 'DAMAGED'>('ITEM_RECEIVED');
+const supportingNote = ref('');
 const evidenceFiles = ref<File[]>([]);
+const messageFiles = ref<File[]>([]);
+const supportingFiles = ref<File[]>([]);
 const fileInput = ref<HTMLInputElement | null>(null);
+const messageFileInput = ref<HTMLInputElement | null>(null);
+const supportingFileInput = ref<HTMLInputElement | null>(null);
 
 const EVIDENCE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'application/pdf']);
 const MAX_EVIDENCE_BYTES = Number(import.meta.env.VITE_EVIDENCE_MAX_FILE_BYTES || 10 * 1024 * 1024);
@@ -54,6 +81,111 @@ const amountText = computed(() => {
   return `${dispute.value.amount.value} ${dispute.value.amount.currency_code || ''}`.trim();
 });
 
+const kindTitle = computed(() => (dispute.value ? caseKindLabel(dispute.value) : '案件'));
+
+const listRoute = computed(() => {
+  const from = route.query.from;
+  if (from === 'complaints') return { name: 'complaints' as const };
+  if (from === 'disputes') return { name: 'disputes' as const };
+  if (dispute.value && isComplaint(dispute.value)) return { name: 'complaints' as const };
+  return { name: 'disputes' as const };
+});
+
+const sellerMustAct = computed(() => needsSellerResponse(dispute.value));
+
+type CaseActionItem = {
+  key: DisputeAction;
+  label: string;
+  icon: string;
+  primary?: boolean;
+  run: () => void;
+};
+
+const caseActions = computed<CaseActionItem[]>(() => {
+  if (!dispute.value) return [];
+  const complaint = isComplaint(dispute.value);
+  const items: CaseActionItem[] = [];
+  if (allow('send-message')) {
+    items.push({
+      key: 'send-message',
+      label: complaint ? '回应投诉' : '联系买家',
+      icon: 'mdi:message-reply-text-outline',
+      primary: true,
+      run: () => {
+        dialog.value = 'message';
+      }
+    });
+  }
+  if (allow('provide-evidence')) {
+    items.push({
+      key: 'provide-evidence',
+      label: '提交证据',
+      icon: 'mdi:file-upload-outline',
+      primary: !items.length && sellerMustAct.value,
+      run: openEvidenceDialog
+    });
+  }
+  if (allow('make-offer') || allow('accept-claim')) {
+    items.push({
+      key: 'make-offer',
+      label: '和解方案',
+      icon: 'mdi:handshake-outline',
+      run: openOutcomeDialog
+    });
+  }
+  if (allow('escalate')) {
+    items.push({
+      key: 'escalate',
+      label: '升级争议',
+      icon: 'mdi:arrow-up-bold-circle-outline',
+      run: () => {
+        dialog.value = 'escalate';
+      }
+    });
+  }
+  if (allow('appeal')) {
+    items.push({
+      key: 'appeal',
+      label: '申诉裁决',
+      icon: 'mdi:gavel',
+      run: () => {
+        dialog.value = 'appeal';
+      }
+    });
+  }
+  if (allow('acknowledge-return-item')) {
+    items.push({
+      key: 'acknowledge-return-item',
+      label: '确认退货',
+      icon: 'mdi:package-variant-closed-check',
+      run: () => {
+        dialog.value = 'acknowledge';
+      }
+    });
+  }
+  if (allow('provide-supporting-info')) {
+    items.push({
+      key: 'provide-supporting-info',
+      label: '补充说明',
+      icon: 'mdi:text-box-plus-outline',
+      run: () => {
+        dialog.value = 'supporting';
+      }
+    });
+  }
+  return items;
+});
+
+const evidenceTypeOptions = computed(() => recommendedEvidenceTypes(dispute.value?.reason));
+
+const evidenceTypeHint = computed(
+  () => evidenceTypeOptions.value.find(o => o.value === evidenceType.value)?.hint || ''
+);
+
+function allow(action: DisputeAction) {
+  return canDoAction(dispute.value, action);
+}
+
 const caseType = computed(() => {
   const stage = dispute.value?.lifeCycleStage || dispute.value?.caseType;
   if (stage) return stageLabel(stage);
@@ -79,8 +211,9 @@ const timeline = computed(() => {
   const created = dispute.value.createdAt;
   const resolved = dispute.value.status === 'RESOLVED';
   const underReview = dispute.value.status === 'UNDER_REVIEW' || resolved;
+  const opened = isComplaint(dispute.value) ? '买家提交投诉' : '买家提出争议';
   return [
-    { at: created, title: '买家提出争议', done: true },
+    { at: created, title: opened, done: true },
     {
       at: created,
       title: 'PayPal 介入',
@@ -114,11 +247,12 @@ async function load() {
   }
 }
 
-async function runAction(
-  action: 'send-message' | 'provide-evidence' | 'make-offer' | 'accept-claim',
-  body: Record<string, unknown>
-) {
+async function runAction(action: DisputeAction, body: Record<string, unknown>) {
   if (!dispute.value || acting.value) return;
+  if (!allow(action)) {
+    message.warning('当前阶段不允许此操作（PayPal links 未授权）');
+    return;
+  }
   acting.value = true;
   try {
     dispute.value = await actOnDispute(dispute.value.id, action, body);
@@ -127,7 +261,15 @@ async function runAction(
     messageText.value = '';
     evidenceNote.value = '';
     trackingNumber.value = '';
+    carrierName.value = '';
+    offerNote.value = '卖家提议退款';
+    escalateNote.value = '';
+    appealNote.value = '';
+    acknowledgeNote.value = '';
+    supportingNote.value = '';
     evidenceFiles.value = [];
+    messageFiles.value = [];
+    supportingFiles.value = [];
   } catch (err) {
     message.error(err instanceof Error ? err.message : '操作失败');
   } finally {
@@ -135,10 +277,20 @@ async function runAction(
   }
 }
 
-function onPickFiles(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const next = [...evidenceFiles.value];
-  for (const file of Array.from(input.files || [])) {
+function openEvidenceDialog() {
+  evidenceType.value = defaultEvidenceType(dispute.value?.reason);
+  dialog.value = 'evidence';
+}
+
+function openOutcomeDialog() {
+  offerAmount.value = dispute.value?.amount?.value || '';
+  offerNote.value = '卖家提议退款';
+  dialog.value = 'outcome';
+}
+
+function collectFiles(current: File[], incoming: File[]) {
+  const next = [...current];
+  for (const file of incoming) {
     const type = file.type === 'image/jpg' ? 'image/jpeg' : file.type;
     if (!EVIDENCE_TYPES.has(type)) {
       message.warning(`${file.name} 不是 JPG、PNG、GIF 或 PDF`);
@@ -154,12 +306,77 @@ function onPickFiles(event: Event) {
     }
     next.push(file);
   }
-  evidenceFiles.value = next;
+  return next;
+}
+
+function onPickFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  evidenceFiles.value = collectFiles(evidenceFiles.value, Array.from(input.files || []));
+  input.value = '';
+}
+
+function onPickMessageFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  messageFiles.value = collectFiles(messageFiles.value, Array.from(input.files || []));
+  input.value = '';
+}
+
+function onPickSupportingFiles(event: Event) {
+  const input = event.target as HTMLInputElement;
+  supportingFiles.value = collectFiles(supportingFiles.value, Array.from(input.files || []));
   input.value = '';
 }
 
 function removeEvidenceFile(index: number) {
   evidenceFiles.value = evidenceFiles.value.filter((_, i) => i !== index);
+}
+
+async function submitMessage() {
+  if (!dispute.value || acting.value) return;
+  if (!allow('send-message')) {
+    message.warning('当前阶段不允许发消息');
+    return;
+  }
+  if (!messageText.value.trim()) return;
+  acting.value = true;
+  try {
+    dispute.value = await sendDisputeMessage(dispute.value.id, {
+      message: messageText.value.trim(),
+      files: messageFiles.value
+    });
+    message.success(dispute.value.sample ? '已更新示例案件' : '已提交到 PayPal');
+    dialog.value = null;
+    messageText.value = '';
+    messageFiles.value = [];
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '操作失败');
+  } finally {
+    acting.value = false;
+  }
+}
+
+async function submitSupporting() {
+  if (!dispute.value || acting.value) return;
+  if (!allow('provide-supporting-info')) {
+    message.warning('当前阶段不允许补充说明');
+    return;
+  }
+  if (!supportingNote.value.trim() && !supportingFiles.value.length) return;
+  acting.value = true;
+  try {
+    dispute.value = await sendSupportingInfo(dispute.value.id, {
+      notes: supportingNote.value.trim(),
+      files: supportingFiles.value
+    });
+    message.success(dispute.value.sample ? '已更新示例案件' : '已提交到 PayPal');
+    dialog.value = null;
+    supportingNote.value = '';
+    supportingFiles.value = [];
+  } catch (err) {
+    message.error(err instanceof Error ? err.message : '操作失败');
+  } finally {
+    acting.value = false;
+  }
 }
 
 function fileSize(bytes: number) {
@@ -169,18 +386,25 @@ function fileSize(bytes: number) {
 
 async function submitEvidence() {
   if (!dispute.value || acting.value) return;
+  if (!allow('provide-evidence')) {
+    message.warning('当前阶段不允许提交证据');
+    return;
+  }
   if (!evidenceNote.value.trim() && !trackingNumber.value.trim() && !evidenceFiles.value.length) return;
   acting.value = true;
   try {
     dispute.value = await provideEvidence(dispute.value.id, {
       notes: evidenceNote.value.trim(),
       trackingNumber: trackingNumber.value.trim(),
+      carrierName: carrierName.value.trim() || undefined,
+      evidenceType: evidenceType.value,
       files: evidenceFiles.value
     });
     message.success(dispute.value.sample ? '已更新示例案件' : '已提交到 PayPal');
     dialog.value = null;
     evidenceNote.value = '';
     trackingNumber.value = '';
+    carrierName.value = '';
     evidenceFiles.value = [];
   } catch (err) {
     message.error(err instanceof Error ? err.message : '操作失败');
@@ -198,16 +422,23 @@ watch(id, () => {
 
 <template>
   <div class="pp-page detail">
-    <button type="button" class="back" @click="router.push({ name: 'disputes' })">
+    <button type="button" class="back" @click="router.push(listRoute)">
       <Icon icon="mdi:arrow-left" width="16" />
-      返回争议列表
+      返回{{ kindTitle === '客户投诉' ? '投诉' : '争议' }}列表
     </button>
 
-    <NSpin :show="loading">
+    <PpAsyncPane
+      :loading="loading"
+      icon="mdi:shield-search-outline"
+      :title="`加载${kindTitle}详情`"
+      description="正在获取案件信息…"
+      min-height="360px"
+    >
       <template v-if="dispute">
         <section class="summary">
           <div class="summary__head">
             <h1 class="summary__id">{{ dispute.id }}</h1>
+            <span class="pp-badge pp-badge--info">{{ kindTitle }}</span>
             <span class="pp-badge" :class="`pp-badge--${badgeTone(dispute.status)}`">
               {{ statusLabel(dispute.status) }}
             </span>
@@ -269,49 +500,36 @@ watch(id, () => {
               </button>
             </div>
           </div>
-        </section>
 
-        <div class="action-bar">
-          <button type="button" class="action-card" @click="dialog = 'message'">
-            <span class="action-card__ico">
-              <Icon icon="mdi:message-reply-text" width="22" height="22" />
-            </span>
-            <span class="action-card__text">
-              <strong>回应争议</strong>
-              <em>给买家发送说明</em>
-            </span>
-            <span class="action-card__go">
-              点击进入
-              <Icon icon="mdi:chevron-right" width="18" height="18" />
-            </span>
-          </button>
-          <button type="button" class="action-card" @click="dialog = 'evidence'">
-            <span class="action-card__ico is-file">
-              <Icon icon="mdi:file-upload" width="22" height="22" />
-            </span>
-            <span class="action-card__text">
-              <strong>提交证据</strong>
-              <em>说明、物流单号或附件</em>
-            </span>
-            <span class="action-card__go">
-              点击进入
-              <Icon icon="mdi:chevron-right" width="18" height="18" />
-            </span>
-          </button>
-          <button type="button" class="action-card" @click="dialog = 'outcome'">
-            <span class="action-card__ico is-result">
-              <Icon icon="mdi:gavel" width="22" height="22" />
-            </span>
-            <span class="action-card__text">
-              <strong>处理结果</strong>
-              <em>提议退款或接受索赔</em>
-            </span>
-            <span class="action-card__go">
-              点击进入
-              <Icon icon="mdi:chevron-right" width="18" height="18" />
-            </span>
-          </button>
-        </div>
+          <div v-if="sellerMustAct" class="seller-alert" role="status">
+            <Icon icon="mdi:clock-alert-outline" width="18" />
+            <div>
+              <strong>等待卖家响应</strong>
+              <p>
+                请尽快留言协商或提交证据
+                <template v-if="deadlineAt !== '—'">（截止 {{ deadlineAt }}）</template>。
+              </p>
+            </div>
+          </div>
+
+          <div v-if="caseActions.length" class="summary__ops">
+            <span class="summary__ops-label">处理操作</span>
+            <div class="summary__ops-btns">
+              <NButton
+                v-for="act in caseActions"
+                :key="act.key"
+                :type="act.primary ? 'primary' : 'default'"
+                size="small"
+                @click="act.run"
+              >
+                <template #icon>
+                  <Icon :icon="act.icon" width="16" />
+                </template>
+                {{ act.label }}
+              </NButton>
+            </div>
+          </div>
+        </section>
 
         <section class="body">
           <div class="body__main">
@@ -322,6 +540,7 @@ watch(id, () => {
                 :class="{ 'is-active': tab === 'progress' }"
                 @click="tab = 'progress'"
               >
+                <Icon icon="mdi:timeline-clock-outline" width="16" />
                 案件进度
               </button>
               <button
@@ -330,6 +549,7 @@ watch(id, () => {
                 :class="{ 'is-active': tab === 'tx' }"
                 @click="tab = 'tx'"
               >
+                <Icon icon="mdi:receipt-text-outline" width="16" />
                 交易信息
               </button>
               <button
@@ -338,6 +558,7 @@ watch(id, () => {
                 :class="{ 'is-active': tab === 'records' }"
                 @click="tab = 'records'"
               >
+                <Icon icon="mdi:text-box-outline" width="16" />
                 处理记录
               </button>
               <button
@@ -346,6 +567,7 @@ watch(id, () => {
                 :class="{ 'is-active': tab === 'files' }"
                 @click="tab = 'files'"
               >
+                <Icon icon="mdi:paperclip" width="16" />
                 相关文件
               </button>
             </div>
@@ -404,6 +626,9 @@ watch(id, () => {
                     <time>{{ formatDateTime(n.at) }}</time>
                     <strong>{{ n.author || '系统' }}</strong>
                     <p>{{ n.text }}</p>
+                    <p v-if="n.documents?.length" class="muted">
+                      附件：{{ n.documents.map(doc => doc.name).filter(Boolean).join('、') }}
+                    </p>
                   </li>
                 </ul>
                 <p v-else class="muted">暂无处理记录。添加备注后将显示在此处。</p>
@@ -419,22 +644,54 @@ watch(id, () => {
                     </p>
                   </li>
                 </ul>
-                <p v-else class="muted">暂无证据。可点击上方「提交证据」补充说明或物流单号。</p>
+                <p v-else class="muted">暂无证据。可在案件信息中点击「提交证据」补充说明或物流单号。</p>
               </div>
             </div>
           </div>
         </section>
 
-        <NModal :show="dialog === 'message'" preset="card" title="回应争议" class="dlg" style="width: 560px" @update:show="open => { if (!open) dialog = null }">
-          <p class="dlg__hint">调查阶段可直接和买家沟通，说明发货或退款安排。</p>
+        <NModal
+          :show="dialog === 'message'"
+          preset="card"
+          :title="dispute && isComplaint(dispute) ? '回应投诉' : '回应争议'"
+          class="dlg"
+          style="width: 560px"
+          @update:show="open => { if (!open) dialog = null }"
+        >
+          <p class="dlg__hint">
+            调查阶段可直接和买家沟通。附件仅支持 JPG / PNG / GIF / PDF，单个不超过 {{ maxEvidenceMb }}MB（PayPal 限制）。
+          </p>
           <textarea v-model="messageText" rows="6" placeholder="写给买家的消息，例如补发进度或退款说明" />
+          <div class="ops__upload">
+            <input
+              ref="messageFileInput"
+              class="ops__file"
+              type="file"
+              accept=".jpg,.jpeg,.png,.gif,.pdf,image/jpeg,image/png,image/gif,application/pdf"
+              multiple
+              @change="onPickMessageFiles"
+            />
+            <button type="button" class="ops__pick" @click="messageFileInput?.click()">
+              <Icon icon="mdi:paperclip" width="16" height="16" />
+              添加附件（可选）
+            </button>
+            <span>最多 {{ MAX_EVIDENCE_FILES }} 个</span>
+          </div>
+          <ul v-if="messageFiles.length" class="ops__files">
+            <li v-for="(file, index) in messageFiles" :key="`${file.name}-${index}`">
+              <Icon icon="mdi:file-image-outline" width="16" height="16" />
+              <span>{{ file.name }}</span>
+              <em>{{ fileSize(file.size) }}</em>
+              <button type="button" @click="messageFiles = messageFiles.filter((_, i) => i !== index)">移除</button>
+            </li>
+          </ul>
           <div class="dlg__foot">
             <NButton @click="dialog = null">取消</NButton>
             <NButton
               type="primary"
               :loading="acting"
               :disabled="!messageText.trim()"
-              @click="runAction('send-message', { message: messageText.trim() })"
+              @click="submitMessage"
             >
               发送消息
             </NButton>
@@ -442,7 +699,18 @@ watch(id, () => {
         </NModal>
 
         <NModal :show="dialog === 'evidence'" preset="card" title="提交证据" class="dlg" style="width: 560px" @update:show="open => { if (!open) dialog = null }">
-          <p class="dlg__hint">可写说明、物流单号，或上传 JPG、PNG、GIF、PDF。</p>
+          <p class="dlg__hint">
+            原因：{{ reasonLabel(dispute.reason) }}。按 PayPal 要求选择证据类型；INR 宜附物流妥投，SNAD 宜附商品描述 / 退货政策。
+          </p>
+          <label class="ops__field">
+            <span>证据类型</span>
+            <select v-model="evidenceType">
+              <option v-for="opt in evidenceTypeOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <em v-if="evidenceTypeHint" class="ops__hint">{{ evidenceTypeHint }}</em>
+          </label>
           <label class="ops__field">
             <span>证据说明</span>
             <textarea v-model="evidenceNote" rows="4" placeholder="说明发货、签收或退款情况" />
@@ -450,6 +718,10 @@ watch(id, () => {
           <label class="ops__field">
             <span>物流单号</span>
             <input v-model="trackingNumber" type="text" placeholder="选填，例如 1Z999AA10123456784" />
+          </label>
+          <label class="ops__field">
+            <span>承运商</span>
+            <input v-model="carrierName" type="text" placeholder="选填，如 UPS / FEDEX / OTHER" />
           </label>
           <div class="ops__upload">
             <input
@@ -487,23 +759,35 @@ watch(id, () => {
           </div>
         </NModal>
 
-        <NModal :show="dialog === 'outcome'" preset="card" title="处理结果" class="dlg" style="width: 520px" @update:show="open => { if (!open) dialog = null }">
-          <p class="dlg__hint">主动和解，或接受买家索赔。</p>
-          <div class="ops__choices">
-            <button
-              type="button"
-              class="choice"
-              :disabled="acting"
-              @click="runAction('make-offer', { amount: dispute.amount?.value, currency: dispute.amount?.currency_code, note: '卖家提议全额退款' })"
-            >
-              <span class="choice__ico">
-                <Icon icon="mdi:cash-refund" width="18" height="18" />
-              </span>
-              <span>
-                <strong>提议全额退款</strong>
-                <em>{{ amountText }}</em>
-              </span>
-            </button>
+        <NModal :show="dialog === 'outcome'" preset="card" title="和解方案" class="dlg" style="width: 560px" @update:show="open => { if (!open) dialog = null }">
+          <p class="dlg__hint">向买家提议退款（make-offer），或直接接受索赔（accept-claim）。</p>
+          <template v-if="allow('make-offer')">
+            <label class="ops__field">
+              <span>提议金额（{{ dispute.amount?.currency_code || 'USD' }}）</span>
+              <input v-model="offerAmount" type="text" inputmode="decimal" placeholder="例如 12.00" />
+            </label>
+            <label class="ops__field">
+              <span>说明</span>
+              <textarea v-model="offerNote" rows="3" placeholder="写给买家的和解说明" />
+            </label>
+            <div class="dlg__foot" style="margin-bottom: 12px">
+              <NButton
+                type="primary"
+                :loading="acting"
+                :disabled="!offerAmount.trim()"
+                @click="
+                  runAction('make-offer', {
+                    amount: offerAmount.trim(),
+                    currency: dispute.amount?.currency_code || 'USD',
+                    note: offerNote.trim() || '卖家提议退款'
+                  })
+                "
+              >
+                提交提议
+              </NButton>
+            </div>
+          </template>
+          <div v-if="allow('accept-claim')" class="ops__choices">
             <button
               type="button"
               class="choice is-danger"
@@ -515,9 +799,124 @@ watch(id, () => {
               </span>
               <span>
                 <strong>接受索赔</strong>
-                <em>承认责任并完成退款</em>
+                <em>承认责任并退款，关闭案件</em>
               </span>
             </button>
+          </div>
+        </NModal>
+
+        <NModal :show="dialog === 'escalate'" preset="card" title="升级争议" class="dlg" style="width: 520px" @update:show="open => { if (!open) dialog = null }">
+          <p class="dlg__hint">协商无果时，可将 Inquiry 升级为 Chargeback，交由 PayPal 裁决（escalate）。</p>
+          <label class="ops__field">
+            <span>升级说明</span>
+            <textarea v-model="escalateNote" rows="4" placeholder="说明无法协商解决的原因" />
+          </label>
+          <div class="dlg__foot">
+            <NButton @click="dialog = null">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="acting"
+              :disabled="!escalateNote.trim()"
+              @click="runAction('escalate', { note: escalateNote.trim() })"
+            >
+              确认升级
+            </NButton>
+          </div>
+        </NModal>
+
+        <NModal :show="dialog === 'acknowledge'" preset="card" title="确认退货" class="dlg" style="width: 520px" @update:show="open => { if (!open) dialog = null }">
+          <p class="dlg__hint">买家已退货时，向 PayPal 确认是否收到退回商品（acknowledge-return-item）。</p>
+          <label class="ops__field">
+            <span>确认结果</span>
+            <select v-model="acknowledgeType">
+              <option value="ITEM_RECEIVED">已收到退货</option>
+              <option value="ITEM_NOT_RECEIVED">未收到退货</option>
+              <option value="DAMAGED">退货损坏</option>
+            </select>
+          </label>
+          <label class="ops__field">
+            <span>说明</span>
+            <textarea v-model="acknowledgeNote" rows="4" placeholder="例如：已签收退货并核验包装完好" />
+          </label>
+          <div class="dlg__foot">
+            <NButton @click="dialog = null">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="acting"
+              :disabled="!acknowledgeNote.trim()"
+              @click="
+                runAction('acknowledge-return-item', {
+                  note: acknowledgeNote.trim(),
+                  acknowledgementType: acknowledgeType
+                })
+              "
+            >
+              提交确认
+            </NButton>
+          </div>
+        </NModal>
+
+        <NModal :show="dialog === 'supporting'" preset="card" title="补充说明" class="dlg" style="width: 560px" @update:show="open => { if (!open) dialog = null }">
+          <p class="dlg__hint">
+            向 PayPal 补充材料（provide-supporting-info）。附件约束与留言相同：JPG / PNG / GIF / PDF。
+          </p>
+          <label class="ops__field">
+            <span>说明</span>
+            <textarea v-model="supportingNote" rows="4" placeholder="补充给 PayPal 的说明" />
+          </label>
+          <div class="ops__upload">
+            <input
+              ref="supportingFileInput"
+              class="ops__file"
+              type="file"
+              accept=".jpg,.jpeg,.png,.gif,.pdf,image/jpeg,image/png,image/gif,application/pdf"
+              multiple
+              @change="onPickSupportingFiles"
+            />
+            <button type="button" class="ops__pick" @click="supportingFileInput?.click()">
+              <Icon icon="mdi:paperclip" width="16" height="16" />
+              添加附件（可选）
+            </button>
+          </div>
+          <ul v-if="supportingFiles.length" class="ops__files">
+            <li v-for="(file, index) in supportingFiles" :key="`${file.name}-${index}`">
+              <Icon icon="mdi:file-image-outline" width="16" height="16" />
+              <span>{{ file.name }}</span>
+              <em>{{ fileSize(file.size) }}</em>
+              <button type="button" @click="supportingFiles = supportingFiles.filter((_, i) => i !== index)">
+                移除
+              </button>
+            </li>
+          </ul>
+          <div class="dlg__foot">
+            <NButton @click="dialog = null">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="acting"
+              :disabled="!supportingNote.trim() && !supportingFiles.length"
+              @click="submitSupporting"
+            >
+              提交补充
+            </NButton>
+          </div>
+        </NModal>
+
+        <NModal :show="dialog === 'appeal'" preset="card" title="申诉裁决" class="dlg" style="width: 520px" @update:show="open => { if (!open) dialog = null }">
+          <p class="dlg__hint">对已决结果不满且满足条件时，可提交新证据申诉（appeal）。</p>
+          <label class="ops__field">
+            <span>申诉说明 / 新证据备注</span>
+            <textarea v-model="appealNote" rows="4" placeholder="说明申诉理由，并可随后再走「提交证据」补附件" />
+          </label>
+          <div class="dlg__foot">
+            <NButton @click="dialog = null">取消</NButton>
+            <NButton
+              type="primary"
+              :loading="acting"
+              :disabled="!appealNote.trim()"
+              @click="runAction('appeal', { note: appealNote.trim() })"
+            >
+              提交申诉
+            </NButton>
           </div>
         </NModal>
       </template>
@@ -529,10 +928,10 @@ watch(id, () => {
         description="案件可能尚未同步，或 ID 不正确。"
       >
         <template #actions>
-          <NButton type="primary" @click="router.push({ name: 'disputes' })">返回列表</NButton>
+          <NButton type="primary" @click="router.push(listRoute)">返回列表</NButton>
         </template>
       </PpEmptyState>
-    </NSpin>
+    </PpAsyncPane>
   </div>
 </template>
 
@@ -553,12 +952,13 @@ watch(id, () => {
 }
 
 .summary {
-  padding: 20px 22px;
+  padding: 20px 22px 0;
   background: #fff;
   border: 1px solid var(--pp-border);
   border-radius: 12px;
   box-shadow: var(--pp-shadow);
   margin-bottom: 14px;
+  overflow: hidden;
 }
 
 .summary__head {
@@ -581,6 +981,7 @@ watch(id, () => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px 32px;
+  padding-bottom: 20px;
 }
 
 .field {
@@ -628,100 +1029,54 @@ watch(id, () => {
   text-decoration: underline;
 }
 
-.action-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
-}
-
-.action-card {
+.seller-alert {
   display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 16px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #f5c26b;
+  background: #fff8eb;
+  color: #92400e;
+}
+
+.seller-alert strong {
+  display: block;
+  font-size: 0.9rem;
+}
+
+.seller-alert p {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: #a16207;
+}
+
+.summary__ops {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  padding: 16px;
-  text-align: left;
-  background: #fff;
-  border: 1px solid #d5e2f2;
-  border-radius: 12px;
-  box-shadow: var(--pp-shadow);
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  gap: 10px 14px;
+  margin: 18px -22px 0;
+  padding: 12px 22px;
+  border-top: 1px solid var(--pp-border);
+  background: #f7f9fc;
 }
 
-.action-card:hover {
-  border-color: #7aa7e8;
-  box-shadow: 0 8px 20px rgba(0, 48, 135, 0.1);
-  transform: translateY(-1px);
-}
-
-.action-card:hover .action-card__go {
-  color: #003087;
-  background: #e7f0fb;
-}
-
-.action-card:hover .action-card__go svg {
-  transform: translateX(2px);
-}
-
-.action-card__text {
-  flex: 1;
-  min-width: 0;
-}
-
-.action-card strong {
-  display: block;
-  font-size: 0.95rem;
-  font-weight: 700;
-  color: #003087;
-}
-
-.action-card em {
-  display: block;
-  margin-top: 3px;
-  font-style: normal;
-  font-size: 0.78rem;
+.summary__ops-label {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
   color: var(--pp-muted);
 }
 
-.action-card__ico {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  flex: none;
-  border-radius: 12px;
-  color: #fff;
-  background: #0070ba;
-}
-
-.action-card__ico.is-file {
-  background: #0f766e;
-}
-
-.action-card__ico.is-result {
-  background: #b45309;
-}
-
-.action-card__go {
-  display: inline-flex;
+.summary__ops-btns {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  flex: none;
-  height: 28px;
-  padding: 0 8px 0 10px;
-  border-radius: 999px;
-  background: #f3f6fb;
-  color: #5b6b82;
-  font-size: 0.75rem;
-  font-weight: 650;
-}
-
-.action-card__go svg {
-  transition: transform 0.15s ease;
+  gap: 8px;
 }
 
 .body {
@@ -739,18 +1094,24 @@ watch(id, () => {
 
 .tabs {
   display: flex;
-  gap: 0;
-  padding: 0 8px;
+  gap: 6px;
+  padding: 10px 12px 0;
   border-bottom: 1px solid var(--pp-border);
+  background: #f7f9fc;
   overflow-x: auto;
 }
 
 .tabs__item {
-  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   flex-shrink: 0;
-  padding: 14px 16px;
-  border: 0;
-  background: none;
+  margin-bottom: -1px;
+  padding: 9px 14px 11px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
   font: inherit;
   font-size: 0.875rem;
   font-weight: 550;
@@ -758,20 +1119,16 @@ watch(id, () => {
   cursor: pointer;
 }
 
-.tabs__item.is-active {
-  color: var(--pp-blue);
-  font-weight: 650;
+.tabs__item:hover {
+  color: var(--pp-text);
+  background: rgba(255, 255, 255, 0.7);
 }
 
-.tabs__item.is-active::after {
-  content: '';
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 0;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--pp-blue);
+.tabs__item.is-active {
+  color: var(--pp-blue-deep);
+  font-weight: 650;
+  background: #fff;
+  border-color: var(--pp-border);
 }
 
 .pane {
@@ -1003,7 +1360,8 @@ watch(id, () => {
 
 .ops__block > textarea,
 .ops__field textarea,
-.ops__field input {
+.ops__field input,
+.ops__field select {
   width: 100%;
   padding: 12px 12px;
   border: 1px solid var(--pp-border);
@@ -1019,7 +1377,8 @@ watch(id, () => {
 
 .ops__block > textarea:focus,
 .ops__field textarea:focus,
-.ops__field input:focus {
+.ops__field input:focus,
+.ops__field select:focus {
   outline: none;
   border-color: #8eb4d6;
   background: #fff;
@@ -1034,6 +1393,14 @@ watch(id, () => {
   font-size: 0.75rem;
   font-weight: 650;
   color: var(--pp-muted);
+}
+
+.ops__hint {
+  font-style: normal;
+  font-weight: 450;
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.4;
 }
 
 .ops__upload {
@@ -1259,8 +1626,7 @@ watch(id, () => {
 }
 
 @media (max-width: 1100px) {
-  .summary__grid,
-  .action-bar {
+  .summary__grid {
     grid-template-columns: 1fr;
   }
 }

@@ -59,7 +59,7 @@ import { cancelPayPalOAuthRedirect, oauthRedirectVisible } from '@/lib/oauth';
 .oauth-mask {
   position: fixed;
   inset: 0;
-  z-index: 3000;
+  z-index: 3010;
   display: grid;
   place-items: center;
   padding: 24px;

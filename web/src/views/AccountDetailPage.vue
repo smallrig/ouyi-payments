@@ -2,7 +2,8 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NButton, NForm, NFormItem, NInput, NModal, NPagination, NSpin, useMessage } from 'naive-ui';
+import { NButton, NForm, NFormItem, NInput, NModal, NPagination, useMessage } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
 import PpTxDetailDrawer from '@/components/PpTxDetailDrawer.vue';
 import {
@@ -183,7 +184,13 @@ watch(pageSize, () => {
       返回账号列表
     </button>
 
-    <NSpin :show="loading">
+    <PpAsyncPane
+      :loading="loading"
+      icon="mdi:account-circle-outline"
+      title="加载账号详情"
+      description="正在获取账号与交易信息…"
+      min-height="360px"
+    >
       <template v-if="account">
         <header class="hero">
           <div class="hero__top">
@@ -357,7 +364,7 @@ watch(pageSize, () => {
           <NButton type="primary" @click="router.push({ name: 'accounts' })">返回列表</NButton>
         </template>
       </PpEmptyState>
-    </NSpin>
+    </PpAsyncPane>
 
     <NModal
       :show="orderOpen"

@@ -4,10 +4,18 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 
+function parseCorsOrigins(raw?: string): string | string[] {
+  const list = String(raw || 'http://127.0.0.1:9713')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+  return list.length <= 1 ? list[0] || 'http://127.0.0.1:9713' : list;
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
-  const origin = config.get<string>('CORS_ORIGIN') || 'http://127.0.0.1:9713';
+  const origin = parseCorsOrigins(config.get<string>('CORS_ORIGIN'));
   const host = config.get<string>('HOST') || '127.0.0.1';
   app.enableCors({
     origin,

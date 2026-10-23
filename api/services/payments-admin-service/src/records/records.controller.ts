@@ -1,6 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query, Req, UploadedFiles, UseInterceptors } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
-import { randomBytes } from 'node:crypto';
 import { envNumber } from '../load-env';
 import { Public } from '../common/public.decorator';
 import { PaypalClient } from '../paypal/paypal.client';
@@ -27,6 +26,7 @@ export class RecordsController {
       env: config.envName,
       port: config.port,
       database: config.database,
+      lastDisputeSync: this.records.lastAutoSync,
     };
   }
 
@@ -66,14 +66,48 @@ export class RecordsController {
   provideEvidence(
     @Param('id') id: string,
     @UploadedFiles() files: Array<{ buffer: Buffer; originalname: string; mimetype: string; size: number }>,
-    @Body() body: { notes?: string; trackingNumber?: string; carrierName?: string },
+    @Body()
+    body: { notes?: string; trackingNumber?: string; carrierName?: string; evidenceType?: string },
   ) {
     return this.records.provideEvidence(id, body || {}, files || []);
   }
 
   /**
-   * action 取 provide-evidence、send-message、make-offer、accept-claim、escalate、appeal。
-   * 必须写在 disputes/sync 之后，避免静态路径被 :id 吃掉。
+   * 给买家发消息，可附 JPG/PNG/GIF/PDF。
+   * 必须写在 :action 之前，否则会被通用路由吃掉。
+   */
+  @Post('disputes/:id/send-message')
+  @UseInterceptors(
+    FilesInterceptor('files', evidenceMaxFiles, {
+      limits: { fileSize: evidenceMaxFileBytes, files: evidenceMaxFiles },
+    }),
+  )
+  sendMessage(
+    @Param('id') id: string,
+    @UploadedFiles() files: Array<{ buffer: Buffer; originalname: string; mimetype: string; size: number }>,
+    @Body() body: { message?: string },
+  ) {
+    return this.records.sendMessage(id, body || {}, files || []);
+  }
+
+  @Post('disputes/:id/provide-supporting-info')
+  @UseInterceptors(
+    FilesInterceptor('files', evidenceMaxFiles, {
+      limits: { fileSize: evidenceMaxFileBytes, files: evidenceMaxFiles },
+    }),
+  )
+  provideSupportingInfo(
+    @Param('id') id: string,
+    @UploadedFiles() files: Array<{ buffer: Buffer; originalname: string; mimetype: string; size: number }>,
+    @Body() body: { notes?: string },
+  ) {
+    return this.records.sendSupportingInfo(id, body || {}, files || []);
+  }
+
+  /**
+   * action 取 provide-evidence、send-message、make-offer、accept-claim、escalate、appeal、
+   * acknowledge-return-item、provide-supporting-info。
+   * 必须写在 disputes/sync 与带文件的静态路径之后。
    */
   @Post('disputes/:id/:action')
   disputeAction(
@@ -87,15 +121,16 @@ export class RecordsController {
   @Public()
   @Post('webhooks/paypal')
   async webhook(@Req() req: any, @Body() body: any) {
-    await this.records.appendWebhook({
-      id: randomBytes(8).toString('hex'),
-      headers: {
-        'paypal-transmission-id': req.headers['paypal-transmission-id'] || '',
-        'paypal-transmission-time': req.headers['paypal-transmission-time'] || '',
+    return this.records.handlePaypalWebhook(
+      {
+        'paypal-auth-algo': String(req.headers['paypal-auth-algo'] || ''),
+        'paypal-cert-url': String(req.headers['paypal-cert-url'] || ''),
+        'paypal-transmission-id': String(req.headers['paypal-transmission-id'] || ''),
+        'paypal-transmission-sig': String(req.headers['paypal-transmission-sig'] || ''),
+        'paypal-transmission-time': String(req.headers['paypal-transmission-time'] || ''),
       },
-      event: body || {},
-    });
-    return { ok: true };
+      body || {},
+    );
   }
 
   @Get('webhooks')

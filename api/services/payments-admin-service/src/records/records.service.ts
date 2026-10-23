@@ -1,5 +1,6 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { randomBytes } from 'node:crypto';
 import { In, Repository } from 'typeorm';
 import { ApiLogEntity } from '../entities/api-log.entity';
 import { DisputeEntity } from '../entities/dispute.entity';
@@ -9,12 +10,18 @@ import { AccountService } from '../account/account.service';
 import { PaypalClient } from '../paypal/paypal.client';
 import { PayPalError } from '../common/paypal.error';
 
+export type DisputeFile = { buffer: Buffer; originalname: string; mimetype: string; size: number };
+
 /**
  * 争议、Webhook 和接口日志。
  * 争议列表来自本地表；详情和回应操作会用该商家自己的令牌再打 PayPal。
  */
 @Injectable()
 export class RecordsService implements OnModuleInit {
+  private readonly logger = new Logger(RecordsService.name);
+  lastAutoSync: { at: string; ok: boolean; message: string } | null = null;
+  private autoSyncing = false;
+
   constructor(
     @InjectRepository(DisputeEntity) private readonly disputes: Repository<DisputeEntity>,
     @InjectRepository(DisputeEventEntity) private readonly events: Repository<DisputeEventEntity>,
@@ -48,9 +55,10 @@ export class RecordsService implements OnModuleInit {
    * 遍历已授权账号，分页拉取争议摘要并写入 pp_dispute。
    * 单个账号失败不影响其他账号；全部失败时把原因抛给前端。
    */
-  async syncDisputes() {
+  async syncDisputes(opts: { allowEmpty?: boolean } = {}) {
     const accounts = (await this.accounts.findAll()).filter((acc) => acc.refreshToken);
     if (!accounts.length) {
+      if (opts.allowEmpty) return { ok: true, count: 0, errors: [], message: '没有已授权账号，跳过同步' };
       throw new PayPalError('没有已授权的 PayPal 账号，无法同步争议', { status: 400 });
     }
     let count = 0;
@@ -78,7 +86,40 @@ export class RecordsService implements OnModuleInit {
     if (!count && errors.length) {
       throw new PayPalError(message, { status: 403 });
     }
-    return { ok: errors.length === 0, count, errors, message };
+    const result = { ok: errors.length === 0, count, errors, message };
+    this.lastAutoSync = { at: new Date().toISOString(), ok: result.ok, message };
+    return result;
+  }
+
+  /** 只同步一个商家的争议摘要。 */
+  async syncDisputesForPayer(payerId: string) {
+    const acc = await this.accounts.findOne(payerId);
+    if (!acc?.refreshToken) {
+      throw new PayPalError(`账号 ${payerId} 尚未授权`, { status: 401 });
+    }
+    const items = await this.paypal.listDisputes(payerId);
+    for (const item of items) {
+      await this.savePaypalDispute(payerId, item, false);
+    }
+    return { ok: true, count: items.length, message: `已同步 ${items.length} 条争议` };
+  }
+
+  /** 定时任务入口：空账号不抛错，避免刷屏。 */
+  async runAutoSync() {
+    if (this.autoSyncing) return this.lastAutoSync;
+    this.autoSyncing = true;
+    try {
+      const result = await this.syncDisputes({ allowEmpty: true });
+      this.logger.log(`自动同步争议：${result.message}`);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '自动同步失败';
+      this.lastAutoSync = { at: new Date().toISOString(), ok: false, message };
+      this.logger.warn(`自动同步争议失败：${message}`);
+      return this.lastAutoSync;
+    } finally {
+      this.autoSyncing = false;
+    }
   }
 
   /**
@@ -219,7 +260,7 @@ export class RecordsService implements OnModuleInit {
    */
   async provideEvidence(
     id: string,
-    body: { notes?: string; trackingNumber?: string; carrierName?: string },
+    body: { notes?: string; trackingNumber?: string; carrierName?: string; evidenceType?: string },
     files: Array<{ buffer: Buffer; originalname: string; mimetype: string; size: number }>,
   ) {
     const existing = await this.disputes.findOne({ where: { id } });
@@ -230,6 +271,7 @@ export class RecordsService implements OnModuleInit {
       notes: body.notes,
       trackingNumber: body.trackingNumber,
       carrierName: body.carrierName,
+      evidenceType: body.evidenceType,
       fileNames: names,
     };
     const payload = this.buildActionBody('provide-evidence', input, existing);
@@ -251,6 +293,67 @@ export class RecordsService implements OnModuleInit {
       await this.paypal.actOnDispute(existing.payerId, id, 'provide-evidence', payload);
     }
     return this.showDispute(id);
+  }
+
+  /**
+   * 给买家发消息。无附件走 JSON；有附件走 multipart（PayPal 仅允许 JPG/PNG/GIF/PDF）。
+   */
+  async sendMessage(
+    id: string,
+    body: { message?: string },
+    files: DisputeFile[] = [],
+  ) {
+    const existing = await this.disputes.findOne({ where: { id } });
+    if (!existing?.payerId) throw new PayPalError('案件不存在或尚未同步', { status: 404 });
+    this.assertEvidenceFiles(files);
+    const payload = this.buildActionBody('send-message', {
+      message: body.message,
+      fileNames: files.map((file) => file.originalname),
+    }, existing);
+    if (existing.raw?.sample === true) {
+      return this.saveSampleAction(existing, 'send-message', {
+        message: body.message,
+        fileNames: files.map((file) => file.originalname),
+      });
+    }
+    await this.paypal.sendDisputeMessage(existing.payerId, id, payload, files);
+    return this.showDispute(id);
+  }
+
+  /** 补充说明（provide-supporting-info），可选附件。 */
+  async sendSupportingInfo(
+    id: string,
+    body: { notes?: string },
+    files: DisputeFile[] = [],
+  ) {
+    const existing = await this.disputes.findOne({ where: { id } });
+    if (!existing?.payerId) throw new PayPalError('案件不存在或尚未同步', { status: 404 });
+    this.assertEvidenceFiles(files);
+    const payload = this.buildActionBody('provide-supporting-info', {
+      notes: body.notes,
+      fileNames: files.map((file) => file.originalname),
+    }, existing);
+    if (existing.raw?.sample === true) {
+      return this.saveSampleAction(existing, 'provide-supporting-info', {
+        notes: body.notes,
+        fileNames: files.map((file) => file.originalname),
+      });
+    }
+    await this.paypal.provideSupportingInfo(existing.payerId, id, payload, files);
+    return this.showDispute(id);
+  }
+
+  private async saveSampleAction(existing: DisputeEntity, action: string, body: Record<string, unknown>) {
+    const raw = this.applySampleAction(existing, action, body);
+    const saved = await this.disputes.save(
+      this.disputes.create({
+        ...existing,
+        status: String(raw.status || existing.status),
+        raw,
+      }),
+    );
+    await this.replaceEvents(saved);
+    return this.present(saved);
   }
 
   /** 提交证据、发消息、提议、接受索赔、升级或申诉，成功后刷新详情。 */
@@ -279,7 +382,33 @@ export class RecordsService implements OnModuleInit {
     if (action === 'send-message') {
       const message = String(body.message || '').trim();
       if (!message) throw new PayPalError('请填写要发送的内容', { status: 400 });
-      return { message };
+      if (message.length > 2000) throw new PayPalError('消息不能超过 2000 字', { status: 400 });
+      const fileNames = Array.isArray(body.fileNames) ? body.fileNames.map((name) => String(name)) : [];
+      return fileNames.length ? { message, documents: fileNames.map((name) => ({ name })) } : { message };
+    }
+    if (action === 'provide-supporting-info') {
+      const notes = String(body.notes || body.message || '').trim();
+      const fileNames = Array.isArray(body.fileNames) ? body.fileNames.map((name) => String(name)) : [];
+      if (!notes && !fileNames.length) throw new PayPalError('请填写补充说明或上传附件', { status: 400 });
+      if (notes.length > 2000) throw new PayPalError('补充说明不能超过 2000 字', { status: 400 });
+      return {
+        notes: notes || `附件：${fileNames.join('、')}`,
+        ...(fileNames.length ? { documents: fileNames.map((name) => ({ name })) } : {}),
+      };
+    }
+    if (action === 'acknowledge-return-item') {
+      const note = String(body.note || body.message || '').trim();
+      const acknowledgementType = String(body.acknowledgementType || body.acknowledgement_type || 'ITEM_RECEIVED')
+        .trim()
+        .toUpperCase();
+      const allowed = new Set(['ITEM_RECEIVED', 'ITEM_NOT_RECEIVED', 'DAMAGED']);
+      if (!allowed.has(acknowledgementType)) {
+        throw new PayPalError('acknowledgementType 只能是 ITEM_RECEIVED、ITEM_NOT_RECEIVED 或 DAMAGED', {
+          status: 400,
+        });
+      }
+      if (!note) throw new PayPalError('请填写退货确认说明', { status: 400 });
+      return { note, acknowledgement_type: acknowledgementType };
     }
     if (action === 'provide-evidence') {
       const notes = String(body.notes || body.message || '').trim();
@@ -289,8 +418,10 @@ export class RecordsService implements OnModuleInit {
       if (!notes && !tracking && !fileNames.length) {
         throw new PayPalError('请填写说明、物流单号，或上传证据文件', { status: 400 });
       }
+      const evidenceType =
+        String(body.evidenceType || '').trim() || (tracking ? 'PROOF_OF_FULFILLMENT' : 'OTHER');
       const evidence: Record<string, unknown> = {
-        evidence_type: tracking ? 'PROOF_OF_FULFILLMENT' : 'OTHER',
+        evidence_type: evidenceType,
         notes: notes || (fileNames.length ? `附件：${fileNames.join('、')}` : '卖家提交的履行证明'),
       };
       if (fileNames.length) {
@@ -490,14 +621,37 @@ export class RecordsService implements OnModuleInit {
     const now = new Date().toISOString();
     const say = (text: string) => messages.push({ posted_by: 'SELLER', time_posted: now, content: text });
     if (action === 'send-message') {
-      say(String(body.message || ''));
+      const fileNames = Array.isArray(body.fileNames) ? body.fileNames.map((name) => String(name)) : [];
+      messages.push({
+        posted_by: 'SELLER',
+        time_posted: now,
+        content: String(body.message || ''),
+        documents: fileNames.map((name) => ({ name })),
+      });
       raw.status = 'WAITING_FOR_BUYER_RESPONSE';
+    } else if (action === 'provide-supporting-info') {
+      const fileNames = Array.isArray(body.fileNames) ? body.fileNames.map((name) => String(name)) : [];
+      say(String(body.notes || body.message || '卖家补充说明'));
+      if (fileNames.length) {
+        evidences.push({
+          evidence_type: 'OTHER',
+          source: 'SUBMITTED_BY_SELLER',
+          notes: `补充说明附件：${fileNames.join('、')}`,
+          documents: fileNames.map((name) => ({ name })),
+        });
+      }
+      raw.status = 'UNDER_REVIEW';
+    } else if (action === 'acknowledge-return-item') {
+      say(
+        `退货确认（${String(body.acknowledgementType || body.acknowledgement_type || 'ITEM_RECEIVED')}）：${String(body.note || body.message || '')}`,
+      );
+      raw.status = 'UNDER_REVIEW';
     } else if (action === 'provide-evidence') {
       const tracking = String(body.trackingNumber || '').trim();
       const notes = String(body.notes || body.message || '').trim();
       const fileNames = Array.isArray(body.fileNames) ? body.fileNames.map((name) => String(name)) : [];
       evidences.push({
-        evidence_type: tracking ? 'PROOF_OF_FULFILLMENT' : 'OTHER',
+        evidence_type: String(body.evidenceType || '').trim() || (tracking ? 'PROOF_OF_FULFILLMENT' : 'OTHER'),
         source: 'SUBMITTED_BY_SELLER',
         notes: [notes, tracking ? `物流单号 ${tracking}` : '', fileNames.length ? `附件：${fileNames.join('、')}` : '']
           .filter(Boolean)
@@ -562,35 +716,187 @@ export class RecordsService implements OnModuleInit {
       : Array.isArray(raw.evidences)
         ? raw.evidences
         : [];
+    const stage = String(raw.dispute_life_cycle_stage || '');
+    const status = String(row.status || '');
+    const outcome = String((raw.dispute_outcome as { outcome_code?: string } | undefined)?.outcome_code || '');
     return {
       id: row.id,
       payerId: row.payerId,
-      status: row.status,
+      status,
       reason: row.reason,
       amount: row.amount?.value ? row.amount : raw.dispute_amount || row.amount,
       createdAt: row.createdAt ? row.createdAt.toISOString() : raw.create_time || '',
       relatedTransactionId: tx?.seller_transaction_id || tx?.buyer_transaction_id || '',
       buyerEmail: tx?.buyer?.email || '',
       deadlineAt: raw.seller_response_due_date || '',
-      caseType: raw.dispute_life_cycle_stage || '',
-      lifeCycleStage: raw.dispute_life_cycle_stage || '',
+      caseType: stage,
+      lifeCycleStage: stage,
       notes: messages.map((msg: any) => ({
         at: msg.time_posted || '',
         text: msg.content || '',
         author: msg.posted_by || '',
+        documents: Array.isArray(msg.documents) ? msg.documents : [],
       })),
       evidences,
       sample: raw.sample === true,
       updatedAt: String(raw.update_time || ''),
       itemName: tx?.items?.[0]?.item_name || tx?.items?.[0]?.item_description || '',
-      outcome: String((raw.dispute_outcome as { outcome_code?: string } | undefined)?.outcome_code || ''),
+      outcome,
+      /**
+       * 当前阶段可执行的操作。优先解析 PayPal 详情里的 HATEOAS links；
+       * 示例案件或 links 缺失时用 status / stage 启发式兜底。
+       */
+      allowedActions: this.resolveAllowedActions(raw, status, stage, outcome),
     };
   }
 
-  async appendWebhook(entry: { id: string; headers: Record<string, string>; event: any }) {
+  /**
+   * 从 PayPal dispute.links 解析可执行 action（rel 或 href 末段）。
+   * 例：rel=provide_evidence / href=.../provide-evidence → provide-evidence
+   */
+  private resolveAllowedActions(
+    raw: Record<string, any>,
+    status: string,
+    stage: string,
+    outcome: string,
+  ): string[] {
+    const known = new Set([
+      'provide-evidence',
+      'send-message',
+      'make-offer',
+      'accept-claim',
+      'escalate',
+      'appeal',
+      'acknowledge-return-item',
+      'provide-supporting-info',
+    ]);
+    const fromLinks = new Set<string>();
+    for (const link of Array.isArray(raw.links) ? raw.links : []) {
+      const rel = String(link?.rel || '')
+        .trim()
+        .toLowerCase()
+        .replace(/_/g, '-');
+      const hrefTail = String(link?.href || '')
+        .split('?')[0]
+        .split('/')
+        .filter(Boolean)
+        .pop()
+        ?.toLowerCase()
+        .replace(/_/g, '-');
+      if (known.has(rel)) fromLinks.add(rel);
+      if (hrefTail && known.has(hrefTail)) fromLinks.add(hrefTail);
+    }
+    if (fromLinks.size) return [...fromLinks];
+
+    // 无 links（示例或摘要）：按状态/阶段推断，避免详情页全部灰掉
+    if (status === 'RESOLVED') {
+      return outcome === 'RESOLVED_BUYER_FAVOUR' || outcome === 'RESOLVED_WITH_PAYOUT' ? ['appeal'] : [];
+    }
+    if (status === 'WAITING_FOR_BUYER_RESPONSE') {
+      return ['send-message'];
+    }
+    const actions = new Set<string>(['send-message', 'provide-evidence', 'make-offer', 'accept-claim']);
+    if (stage === 'INQUIRY' || !stage) actions.add('escalate');
+    if (stage === 'CHARGEBACK' || stage === 'PRE_ARBITRATION' || stage === 'ARBITRATION') {
+      actions.add('appeal');
+      actions.add('acknowledge-return-item');
+      actions.add('provide-supporting-info');
+    }
+    if (status === 'WAITING_FOR_SELLER_RESPONSE' || status === 'OPEN' || status === 'UNDER_REVIEW') {
+      return [...actions];
+    }
+    return [...actions];
+  }
+
+  /**
+   * 接收 PayPal Webhook：落库 →（可选）验签 → 对 CUSTOMER.DISPUTE.* 拉详情回写状态。
+   * 处理失败仍返回 ok，避免 PayPal 因业务错误无限重试；验签失败则抛 400。
+   */
+  async handlePaypalWebhook(headers: Record<string, string>, event: any) {
+    const eventId = String(event?.id || '').trim();
+    if (eventId) {
+      const exists = await this.webhooks
+        .createQueryBuilder('w')
+        .where(`w.event->>'id' = :id`, { id: eventId })
+        .getOne();
+      if (exists) return { ok: true, duplicate: true, eventId };
+    }
+
+    const verifyOn = ['1', 'true', 'yes'].includes(
+      String(process.env.PAYPAL_WEBHOOK_VERIFY || '').trim().toLowerCase(),
+    );
+    if (verifyOn) {
+      await this.paypal.verifyWebhookSignature(headers, event);
+    }
+
+    await this.appendWebhook({
+      headers,
+      event: event || {},
+    });
+
+    const eventType = String(event?.event_type || '');
+    if (!/^CUSTOMER\.DISPUTE\./i.test(eventType)) {
+      return { ok: true, handled: false, eventType };
+    }
+
+    try {
+      const applied = await this.applyDisputeWebhook(event);
+      return { ok: true, handled: true, eventType, ...applied };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '处理争议 Webhook 失败';
+      this.logger.warn(`Webhook ${eventType} 未更新案件：${message}`);
+      return { ok: true, handled: false, eventType, error: message };
+    }
+  }
+
+  /** 用 webhook resource 更新本地状态，再按商家令牌拉完整详情。 */
+  private async applyDisputeWebhook(event: any) {
+    const resource = event?.resource || {};
+    const disputeId = String(resource.dispute_id || resource.id || '').trim();
+    if (!disputeId) throw new PayPalError('Webhook 缺少 dispute_id', { status: 400 });
+    const payerId = await this.resolveWebhookPayerId(resource, disputeId);
+    if (!payerId) throw new PayPalError(`找不到案件 ${disputeId} 对应的商家账号`, { status: 404 });
+    await this.savePaypalDispute(payerId, resource, false);
+    try {
+      await this.showDispute(disputeId);
+    } catch (error) {
+      this.logger.warn(
+        `Webhook 已写入摘要，拉详情失败 ${disputeId}：${error instanceof Error ? error.message : error}`,
+      );
+    }
+    const saved = await this.disputes.findOne({ where: { id: disputeId } });
+    return { disputeId, payerId, status: saved?.status || String(resource.status || '') };
+  }
+
+  private async resolveWebhookPayerId(resource: any, disputeId: string) {
+    const existing = await this.disputes.findOne({ where: { id: disputeId } });
+    if (existing?.payerId) return existing.payerId;
+    const hinted = String(
+      resource.seller?.merchant_id ||
+        resource.disputed_transactions?.[0]?.seller?.merchant_id ||
+        resource.disputed_transactions?.[0]?.seller_transaction_id ||
+        '',
+    ).trim();
+    if (hinted) {
+      const acc = await this.accounts.findOne(hinted);
+      if (acc?.refreshToken) return acc.payerId;
+    }
+    const accounts = (await this.accounts.findAll()).filter((acc) => acc.refreshToken);
+    for (const acc of accounts) {
+      try {
+        await this.paypal.getDispute(acc.payerId, disputeId);
+        return acc.payerId;
+      } catch {
+        /* 该商家看不到此案件 */
+      }
+    }
+    return '';
+  }
+
+  async appendWebhook(entry: { id?: string; headers: Record<string, string>; event: any }) {
     await this.webhooks.save(
       this.webhooks.create({
-        id: entry.id,
+        id: entry.id || randomBytes(8).toString('hex'),
         receivedAt: new Date(),
         headers: entry.headers,
         event: entry.event || {},
@@ -659,12 +965,23 @@ export class RecordsService implements OnModuleInit {
       }
     }
     const disputes = await this.listDisputes();
+    const open = disputes.filter((d) => d.status !== 'RESOLVED');
+    const isInquiry = (d: { lifeCycleStage?: string; caseType?: string }) =>
+      String(d.lifeCycleStage || d.caseType || 'INQUIRY') === 'INQUIRY';
+    const complaintCount = open.filter(isInquiry).length;
+    const disputeCaseCount = open.filter((d) => !isInquiry(d)).length;
     return {
       accountCount: accounts.length,
       authorizedCount: accounts.filter((a) => a.refreshToken).length,
       totalReceived: Math.round(totalReceived * 100) / 100,
       totalWithdrawn: Math.round(totalWithdrawn * 100) / 100,
-      disputeCount: disputes.filter((d) => d.status === 'OPEN' || d.status === 'UNDER_REVIEW').length,
+      /** 未结案合计；首页「待处理」兼容字段 */
+      disputeCount: open.length,
+      complaintCount,
+      disputeCaseCount,
+      lastDisputeSyncAt: this.lastAutoSync?.at || '',
+      lastDisputeSyncOk: this.lastAutoSync?.ok ?? null,
+      lastDisputeSyncMessage: this.lastAutoSync?.message || '',
     };
   }
 }

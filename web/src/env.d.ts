@@ -7,12 +7,15 @@ interface ImportMetaEnv {
   readonly VITE_APP_TITLE: string;
   readonly VITE_APP_CODE: string;
   readonly VITE_HTTP_PROXY?: string;
-  readonly VITE_LOGTO_ENDPOINT: string;
-  readonly VITE_LOGTO_APP_ID: string;
-  readonly VITE_LOGTO_API_RESOURCE: string;
-  readonly VITE_PLATFORM_ID: string;
+  readonly VITE_SERVICE_BASE_URL: string;
+  readonly VITE_AUTH_API_PREFIX?: string;
+  readonly VITE_PORTAL_URL?: string;
+  readonly VITE_STANDALONE_AUTH?: string;
   readonly VITE_PAYPAL_API_BASE?: string;
+  readonly VITE_PAYPAL_API_TARGET?: string;
   readonly VITE_PAYPAL_OAUTH_START?: string;
+  readonly VITE_PAYPAL_REDIRECT_URI?: string;
+  readonly VITE_PAYPAL_WEBHOOK_URL?: string;
 }
 
 interface ImportMeta {

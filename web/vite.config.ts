@@ -9,17 +9,23 @@ export default defineConfig(({ mode, command }) => {
   const base = env.VITE_BASE_URL || '/';
   const enableProxy = command === 'serve' && env.VITE_HTTP_PROXY === 'Y';
   const paypalApiBase = env.VITE_PAYPAL_API_TARGET || 'http://127.0.0.1:3025';
+  const serviceBase = env.VITE_SERVICE_BASE_URL || 'http://127.0.0.1:3020';
   const host = env.VITE_HOST || '0.0.0.0';
   const port = Number(env.VITE_PORT || 9713);
 
-  // preview 也需要代理：否则 /api/paypal/* 会落到 SPA HTML，列表永远为空
+  // preview 也需要代理：否则 /api/paypal/* 会落到 SPA HTML，列表永远为空。
+  // /api 默认打本机 payments-api；Identity 只走明确的 portal 前缀。
   const proxy: Record<string, object> = {
     '^/api/paypal': {
       target: paypalApiBase,
       changeOrigin: true,
       rewrite: (path: string) => path.replace(/^\/api\/paypal/, '/api')
-    }
+    },
+    '^/api': { target: paypalApiBase, changeOrigin: true }
   };
+  if (env.VITE_AUTH_API_PREFIX) {
+    proxy['^/api/account'] = { target: serviceBase, changeOrigin: true };
+  }
 
   return {
     base,

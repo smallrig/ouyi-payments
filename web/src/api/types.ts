@@ -26,7 +26,15 @@ export type DashboardStats = {
   authorizedCount: number;
   totalReceived: number;
   totalWithdrawn: number;
+  /** 未结案合计（兼容旧字段） */
   disputeCount: number;
+  /** 未结案客户投诉（INQUIRY） */
+  complaintCount?: number;
+  /** 未结案正式争议（非 INQUIRY） */
+  disputeCaseCount?: number;
+  lastDisputeSyncAt?: string;
+  lastDisputeSyncOk?: boolean | null;
+  lastDisputeSyncMessage?: string;
 };
 
 export type MoneyAmount = { currency_code?: string; value?: string };
@@ -127,7 +135,7 @@ export type DisputeItem = {
   caseType?: string;
   timeline?: Array<{ at: string; title: string; done?: boolean }>;
   /** 双方留言，来自 messages */
-  notes?: Array<{ at: string; text: string; author?: string }>;
+  notes?: Array<{ at: string; text: string; author?: string; documents?: Array<{ name?: string }> }>;
   /** INQUIRY、CHARGEBACK、PRE_ARBITRATION、ARBITRATION */
   lifeCycleStage?: string;
   evidences?: Array<{
@@ -143,6 +151,12 @@ export type DisputeItem = {
   itemName?: string;
   /** 结案结果，如 RESOLVED_SELLER_FAVOUR */
   outcome?: string;
+  /**
+   * 当前可执行操作（来自 PayPal HATEOAS links，或服务端按状态启发式）。
+   * 如 send-message / provide-evidence / make-offer / accept-claim /
+   * escalate / appeal / acknowledge-return-item / provide-supporting-info
+   */
+  allowedActions?: string[];
 };
 
 export type WebhookItem = {
@@ -161,4 +175,37 @@ export type ApiLogItem = {
   debugId?: string;
   ms: number;
   at?: string;
+};
+
+export type SyncTaskType = 'transactions' | 'disputes';
+
+export type SyncTask = {
+  id: string;
+  name: string;
+  type: SyncTaskType | string;
+  payerId: string;
+  accountLabel?: string;
+  enabled: boolean;
+  intervalSec: number;
+  lookbackDays: number;
+  status: string;
+  lastMessage: string;
+  lastRunAt: string;
+  nextRunAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SyncLog = {
+  id: string;
+  taskId: string;
+  type: string;
+  payerId: string;
+  triggerBy: string;
+  status: string;
+  count: number;
+  message: string;
+  startedAt: string;
+  finishedAt: string;
+  ms: number;
 };

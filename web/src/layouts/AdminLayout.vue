@@ -1,20 +1,38 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NDropdown, NAvatar } from 'naive-ui';
+import { NAvatar, NDropdown, useMessage } from 'naive-ui';
+import PpOAuthConfirmModal from '@/components/PpOAuthConfirmModal.vue';
 import PpOAuthRedirectModal from '@/components/PpOAuthRedirectModal.vue';
+import PpOAuthSuccessModal from '@/components/PpOAuthSuccessModal.vue';
+import { consumePayPalOAuthResult, stripOAuthQuery } from '@/lib/oauth';
 import { useAuthStore } from '@/store/auth';
 
 const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
+const message = useMessage();
+
+watch(
+  () => route.query.auth,
+  async () => {
+    const result = consumePayPalOAuthResult(route.query as Record<string, unknown>);
+    if (!result.consumed) return;
+    await router.replace({ query: stripOAuthQuery({ ...route.query }) });
+    if (result.error) message.error(result.error);
+  },
+  { immediate: true }
+);
 
 const navItems = [
   { name: 'dashboard', label: '首页', icon: 'mdi:view-dashboard-outline', match: ['dashboard'] },
   { name: 'transactions', label: '交易记录', icon: 'mdi:receipt-text-outline', match: ['transactions'] },
-  { name: 'disputes', label: '争议案件', icon: 'mdi:shield-alert-outline', match: ['disputes', 'dispute-detail'] },
-  { name: 'accounts', label: '账号管理', icon: 'mdi:account-multiple-outline', match: ['accounts', 'account-detail'] }
+  { name: 'complaints', label: '客户投诉', icon: 'mdi:message-alert-outline', match: ['complaints'] },
+  { name: 'disputes', label: '争议案件', icon: 'mdi:shield-alert-outline', match: ['disputes'] },
+  { name: 'accounts', label: '账号管理', icon: 'mdi:account-multiple-outline', match: ['accounts', 'account-detail'] },
+  { name: 'reports', label: '数据报表', icon: 'mdi:chart-box-outline', match: ['reports'] },
+  { name: 'sync-tasks', label: '同步任务', icon: 'mdi:cloud-sync-outline', match: ['sync-tasks'] }
 ] as const;
 
 const pageMeta: Record<string, string> = {
@@ -22,14 +40,28 @@ const pageMeta: Record<string, string> = {
   accounts: '账号管理',
   'account-detail': '账号详情',
   transactions: '交易记录',
+  complaints: '客户投诉',
   disputes: '争议案件',
-  'dispute-detail': '案件详情'
+  'dispute-detail': '案件详情',
+  reports: '数据报表',
+  'sync-tasks': '同步任务'
 };
 
 const activeName = computed(() => String(route.name || 'dashboard'));
-const currentTitle = computed(() => pageMeta[activeName.value] || '首页');
+const currentTitle = computed(() => {
+  if (activeName.value === 'dispute-detail') {
+    return route.query.from === 'complaints' ? '客户投诉' : '争议案件';
+  }
+  return pageMeta[activeName.value] || '首页';
+});
 
 function isActive(item: (typeof navItems)[number]) {
+  if (activeName.value === 'dispute-detail') {
+    const from = String(route.query.from || '');
+    if (item.name === 'complaints') return from === 'complaints';
+    if (item.name === 'disputes') return from !== 'complaints';
+    return false;
+  }
   return (item.match as readonly string[]).includes(activeName.value);
 }
 
@@ -99,7 +131,9 @@ const initial = computed(() => (auth.displayName || 'U').slice(0, 1).toUpperCase
       </main>
     </div>
 
+    <PpOAuthConfirmModal />
     <PpOAuthRedirectModal />
+    <PpOAuthSuccessModal />
   </div>
 </template>
 

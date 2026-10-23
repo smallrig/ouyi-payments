@@ -2,8 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NButton, NPagination, NSelect, NSpin, useMessage } from 'naive-ui';
+import { NButton, NDatePicker, NPagination, NSelect, useMessage } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
+import PpPageHero from '@/components/PpPageHero.vue';
 import PpTxDetailDrawer from '@/components/PpTxDetailDrawer.vue';
 import { useClientPagination } from '@/composables/useClientPagination';
 import { fetchAccounts, fetchRecentTransactionsAcrossAccounts } from '@/api/paypal';
@@ -25,11 +27,12 @@ import {
 
 const router = useRouter();
 const message = useMessage();
-const loading = ref(false);
+const loading = ref(true);
 const accounts = ref<PayPalAccount[]>([]);
 const filterPayerId = ref<string | null>(null);
 const statusFilter = ref<string | null>(null);
 const typeFilter = ref<string | null>(null);
+const dateRange = ref<[number, number] | null>(null);
 const keyword = ref('');
 const rows = ref<TxRow[]>([]);
 
@@ -46,7 +49,16 @@ const statusOptions = [
 ];
 
 const hasAccounts = computed(() => accounts.value.length > 0);
+const hasDateRange = computed(() => Boolean(dateRange.value));
 const isFilteredEmpty = computed(() => Boolean(filterPayerId.value) && hasAccounts.value);
+
+function rangeQuery() {
+  if (!dateRange.value) return undefined;
+  const [start, end] = dateRange.value;
+  const to = new Date(end);
+  to.setHours(23, 59, 59, 999);
+  return { from: new Date(start).toISOString(), to: to.toISOString() };
+}
 
 const typeOptions = computed(() => {
   const codes = rows.value.map(r => txInfo(r.tx).transaction_event_code || '').filter(Boolean);
@@ -83,6 +95,17 @@ const { page, pageSize, pageSizes, paged: pagedRows, pageCount, resetPage } = us
   10
 );
 
+const heroMetrics = computed(() => {
+  const success = rows.value.filter(r => txInfo(r.tx).transaction_status === 'S').length;
+  const pending = rows.value.filter(r => txInfo(r.tx).transaction_status === 'P').length;
+  return [
+    { label: '交易笔数', value: rows.value.length },
+    { label: '成功', value: success },
+    { label: '处理中', value: pending },
+    { label: '收款账号', value: accounts.value.length }
+  ];
+});
+
 function amountClass(row: TxRow) {
   const n = txAmountNumber(row.tx);
   if (n > 0) return 'is-in';
@@ -103,6 +126,7 @@ function clearFilters() {
   statusFilter.value = null;
   typeFilter.value = null;
   filterPayerId.value = null;
+  dateRange.value = null;
   resetPage();
 }
 
@@ -127,7 +151,8 @@ async function loadTransactions() {
     rows.value = await fetchRecentTransactionsAcrossAccounts(
       list,
       filterPayerId.value ? 200 : 80,
-      500
+      500,
+      rangeQuery()
     );
     resetPage();
   } catch (err) {
@@ -168,22 +193,26 @@ onMounted(async () => {
   await loadTransactions();
 });
 
-watch(filterPayerId, () => void loadTransactions());
+watch([filterPayerId, dateRange], () => void loadTransactions());
 watch([statusFilter, typeFilter, keyword], () => resetPage());
 </script>
 
 <template>
   <div class="pp-page">
-    <div class="pp-page-head">
-      <div>
-        <h1 class="pp-page-title">交易记录</h1>
-        <p class="pp-page-desc">按账号、状态、类型筛选交易；点击详情查看完整信息</p>
-      </div>
-      <NButton secondary @click="goSync">
-        <template #icon><Icon icon="mdi:cloud-sync-outline" width="16" /></template>
-        去同步
-      </NButton>
-    </div>
+    <PpPageHero
+      icon="mdi:swap-horizontal"
+      kicker="资金流水"
+      title="交易记录"
+      description="按账号、状态、类型和交易时间范围查询；点击详情查看完整信息。"
+      :metrics="heroMetrics"
+    >
+      <template #actions>
+        <NButton @click="goSync">
+          <template #icon><Icon icon="mdi:cloud-sync-outline" width="16" /></template>
+          去同步
+        </NButton>
+      </template>
+    </PpPageHero>
 
     <div class="pp-filter">
       <div class="pp-filter__field pp-filter__field--account">
@@ -214,6 +243,16 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
           size="medium"
         />
       </div>
+      <div class="pp-filter__field pp-filter__field--range">
+        <NDatePicker
+          v-model:value="dateRange"
+          type="daterange"
+          clearable
+          size="medium"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+        />
+      </div>
       <div class="pp-filter__search search">
         <Icon icon="mdi:magnify" width="16" class="search__icon" />
         <input
@@ -229,8 +268,13 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
       <NButton quaternary @click="clearFilters">重置</NButton>
     </div>
 
-    <NSpin :show="loading">
-      <template v-if="!loading && !rows.length">
+    <PpAsyncPane
+      :loading="loading"
+      icon="mdi:receipt-text-outline"
+      title="加载交易"
+      description="正在拉取交易流水…"
+    >
+      <template v-if="!rows.length">
         <div class="pp-table-wrap">
           <PpEmptyState
             v-if="!hasAccounts"
@@ -240,6 +284,17 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
           >
             <template #actions>
               <NButton type="primary" @click="startPayPalOAuth()">授权收款账号</NButton>
+            </template>
+          </PpEmptyState>
+          <PpEmptyState
+            v-else-if="hasDateRange"
+            icon="mdi:calendar-blank-outline"
+            title="该时间范围内暂无交易"
+            description="换一个起止日期，或先同步更早的账单。"
+          >
+            <template #actions>
+              <NButton secondary @click="dateRange = null">清空时间</NButton>
+              <NButton type="primary" @click="goSync">去同步</NButton>
             </template>
           </PpEmptyState>
           <PpEmptyState
@@ -339,7 +394,7 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
           </template>
         </div>
       </template>
-    </NSpin>
+    </PpAsyncPane>
 
     <PpTxDetailDrawer
       :open="detailOpen"
@@ -368,6 +423,15 @@ watch([statusFilter, typeFilter, keyword], () => resetPage());
 .pp-filter__field--wide {
   width: 260px;
   flex-basis: 260px;
+}
+
+.pp-filter__field--range {
+  width: 280px;
+  flex-basis: 280px;
+}
+
+.pp-filter__field--range :deep(.n-date-picker) {
+  width: 100%;
 }
 
 .search-input {

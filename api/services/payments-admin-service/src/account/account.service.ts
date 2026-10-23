@@ -125,10 +125,16 @@ export class AccountService implements OnModuleInit {
     };
   }
 
-  /** 交易列表只读 pp_transaction。缓存表只保留同步时间和查询区间。 */
-  async readTransactions(payerId: string) {
+  /** 交易列表只读 pp_transaction。from、to 按交易发生时间做闭区间过滤。 */
+  async readTransactions(payerId: string, range?: { from?: Date; to?: Date }) {
+    const query = this.transactions
+      .createQueryBuilder('tx')
+      .where('tx.payerId = :payerId', { payerId })
+      .orderBy('tx.initiatedAt', 'DESC');
+    if (range?.from) query.andWhere('tx.initiatedAt >= :from', { from: range.from });
+    if (range?.to) query.andWhere('tx.initiatedAt <= :to', { to: range.to });
     const [rows, cache] = await Promise.all([
-      this.transactions.find({ where: { payerId }, order: { initiatedAt: 'DESC' } }),
+      query.getMany(),
       this.caches.findOne({ where: { payerId } }),
     ]);
     return {

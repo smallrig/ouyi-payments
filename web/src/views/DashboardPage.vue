@@ -2,8 +2,10 @@
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { Icon } from '@iconify/vue';
-import { NButton, NSpin, useMessage } from 'naive-ui';
+import { NButton, useMessage } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
+import PpPageHero from '@/components/PpPageHero.vue';
 import {
   fetchAccounts,
   fetchRecentTransactionsAcrossAccounts,
@@ -52,44 +54,52 @@ const weekInflow = computed(() =>
 
 const weekCount = computed(() => trend.value.reduce((s, d) => s + d.count, 0));
 
-const metricCards = computed(() => [
-  {
-    key: 'income',
-    label: '收款总额',
-    value: formatMoney(stats.value?.totalReceived ?? null),
-    sub: `近 7 日流入 ${formatMoney(weekInflow.value)}`,
-    icon: 'mdi:trending-up',
-    tone: 'blue',
-    to: 'transactions'
-  },
-  {
-    key: 'count',
-    label: '交易笔数',
-    value: String(txRows.value.length || 0),
-    sub: `近 7 日 ${weekCount.value} 笔`,
-    icon: 'mdi:swap-horizontal',
-    tone: 'navy',
-    to: 'transactions'
-  },
-  {
-    key: 'accounts',
-    label: '管理账号',
-    value: String(stats.value?.accountCount ?? 0),
-    sub: `${stats.value?.authorizedCount ?? 0} 个已授权`,
-    icon: 'mdi:account-multiple-outline',
-    tone: 'teal',
-    to: 'accounts'
-  },
-  {
-    key: 'risk',
-    label: '待处理',
-    value: String((stats.value?.disputeCount ?? 0) + pendingCount.value),
-    sub: `争议 ${stats.value?.disputeCount ?? 0} · 处理中 ${pendingCount.value}`,
-    icon: 'mdi:alert-circle-outline',
-    tone: 'warn',
-    to: 'disputes'
-  }
-]);
+const metricCards = computed(() => {
+  const complaints = stats.value?.complaintCount ?? 0;
+  const disputeCases = stats.value?.disputeCaseCount ?? stats.value?.disputeCount ?? 0;
+  return [
+    {
+      key: 'income',
+      label: '收款总额',
+      value: formatMoney(stats.value?.totalReceived ?? null),
+      sub: `近 7 日流入 ${formatMoney(weekInflow.value)}`,
+      icon: 'mdi:trending-up',
+      tone: 'blue',
+      to: 'transactions',
+      query: undefined as Record<string, string> | undefined
+    },
+    {
+      key: 'count',
+      label: '交易笔数',
+      value: String(txRows.value.length || 0),
+      sub: `近 7 日 ${weekCount.value} 笔`,
+      icon: 'mdi:swap-horizontal',
+      tone: 'navy',
+      to: 'transactions',
+      query: undefined as Record<string, string> | undefined
+    },
+    {
+      key: 'complaints',
+      label: '待处理投诉',
+      value: String(complaints),
+      sub: 'PayPal Inquiry 未结案',
+      icon: 'mdi:message-alert-outline',
+      tone: 'warn',
+      to: 'complaints',
+      query: undefined as Record<string, string> | undefined
+    },
+    {
+      key: 'disputes',
+      label: '争议案件',
+      value: String(disputeCases),
+      sub: `未结案 · 交易处理中 ${pendingCount.value}`,
+      icon: 'mdi:shield-alert-outline',
+      tone: 'teal',
+      to: 'disputes',
+      query: undefined as Record<string, string> | undefined
+    }
+  ];
+});
 
 const trend = computed(() => {
   const days: { key: string; label: string; weekday: string; count: number; amount: number }[] = [];
@@ -170,26 +180,32 @@ onMounted(() => void load());
 
 <template>
   <div class="pp-page home">
-    <header class="hero">
-      <div class="hero__copy">
-        <p class="hero__greet">{{ greeting }}，{{ auth.displayName || '管理员' }}</p>
-        <h1 class="hero__title">收款经营概览</h1>
-        <p class="hero__desc">账号状态、交易流水与风险事项集中查看</p>
-      </div>
-      <div class="hero__actions">
-        <NButton quaternary @click="load">
+    <PpPageHero
+      icon="mdi:view-dashboard-outline"
+      :kicker="`${greeting}，${auth.displayName || '管理员'}`"
+      title="收款经营概览"
+      description="账号状态、交易流水与风险事项集中查看。"
+    >
+      <template #actions>
+        <NButton @click="load">
           <template #icon><Icon icon="mdi:refresh" width="16" /></template>
           刷新
         </NButton>
-        <NButton secondary @click="router.push({ name: 'transactions' })">交易记录</NButton>
+        <NButton @click="router.push({ name: 'transactions' })">交易记录</NButton>
         <NButton type="primary" @click="startPayPalOAuth()">
           <template #icon><Icon icon="mdi:paypal" width="16" /></template>
           绑定账号
         </NButton>
-      </div>
-    </header>
+      </template>
+    </PpPageHero>
 
-    <NSpin :show="loading">
+    <PpAsyncPane
+      :loading="loading"
+      icon="mdi:view-dashboard-outline"
+      title="加载概览"
+      description="正在汇总收款与交易数据…"
+      min-height="420px"
+    >
       <div class="metrics">
         <button
           v-for="m in metricCards"
@@ -197,7 +213,7 @@ onMounted(() => void load());
           type="button"
           class="metric"
           :data-tone="m.tone"
-          @click="router.push({ name: m.to })"
+          @click="router.push({ name: m.to, query: m.query })"
         >
           <div class="metric__icon">
             <Icon :icon="m.icon" width="20" />
@@ -230,7 +246,7 @@ onMounted(() => void load());
           </div>
 
           <PpEmptyState
-            v-if="!loading && !accounts.length"
+            v-if="!accounts.length"
             compact
             icon="mdi:chart-bar"
             title="还没有数据可展示"
@@ -283,11 +299,11 @@ onMounted(() => void load());
                 <em>跨账号筛选与查单</em>
               </span>
             </button>
-            <button type="button" class="quick__item" @click="router.push({ name: 'disputes' })">
-              <span class="quick__icon" data-c="warn"><Icon icon="mdi:shield-alert-outline" width="18" /></span>
+            <button type="button" class="quick__item" @click="router.push({ name: 'complaints' })">
+              <span class="quick__icon" data-c="warn"><Icon icon="mdi:message-alert-outline" width="18" /></span>
               <span>
-                <strong>处理争议</strong>
-                <em>投诉与案件进度</em>
+                <strong>客户投诉</strong>
+                <em>Inquiry 询单与回应</em>
               </span>
             </button>
             <button type="button" class="quick__item" @click="router.push({ name: 'accounts' })">
@@ -382,70 +398,11 @@ onMounted(() => void load());
           </ul>
         </section>
       </div>
-    </NSpin>
+    </PpAsyncPane>
   </div>
 </template>
 
 <style scoped>
-.hero {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 20px;
-  padding: 22px 24px;
-  border-radius: 12px;
-  color: #fff;
-  background:
-    radial-gradient(ellipse 70% 120% at 100% 0%, rgba(30, 143, 255, 0.35), transparent 55%),
-    linear-gradient(125deg, #003087 0%, #0070ba 55%, #005ea6 100%);
-  box-shadow: 0 12px 32px rgba(0, 48, 135, 0.22);
-}
-
-.hero__greet {
-  margin: 0 0 4px;
-  font-size: 0.8rem;
-  opacity: 0.75;
-}
-
-.hero__title {
-  margin: 0 0 6px;
-  font-size: 1.45rem;
-  font-weight: 700;
-  letter-spacing: -0.03em;
-}
-
-.hero__desc {
-  margin: 0;
-  font-size: 0.875rem;
-  opacity: 0.78;
-}
-
-.hero__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.hero__actions :deep(.n-button) {
-  --n-text-color: #fff !important;
-  --n-text-color-hover: #fff !important;
-  --n-border: 1px solid rgba(255, 255, 255, 0.28) !important;
-  --n-border-hover: 1px solid rgba(255, 255, 255, 0.5) !important;
-  --n-color: rgba(255, 255, 255, 0.12) !important;
-  --n-color-hover: rgba(255, 255, 255, 0.2) !important;
-}
-
-.hero__actions :deep(.n-button--primary-type) {
-  --n-color: #fff !important;
-  --n-color-hover: #f0f7ff !important;
-  --n-text-color: #003087 !important;
-  --n-text-color-hover: #003087 !important;
-  --n-border: 1px solid #fff !important;
-  --n-border-hover: 1px solid #fff !important;
-}
-
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

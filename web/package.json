@@ -3,9 +3,10 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "description": "Payments — 收款账号与交易流水（ouyi-shop workbench, app_code=payments）",
+  "description": "Payments — 收款账号与交易流水（ouyi-shop workbench, app_code=paypal）",
   "scripts": {
     "build": "vite build --mode prod",
+    "build:sandbox": "vite build --mode sandbox",
     "predev": "node kill-port.cjs",
     "dev": "vite --mode test",
     "preview": "vite preview",
@@ -13,7 +14,9 @@
   },
   "dependencies": {
     "@iconify/vue": "5.0.0",
-    "@logto/browser": "^3.1.0",
+    "@oy/admin-auth-sdk": "workspace:*",
+    "@oy/admin-config": "workspace:*",
+    "@oy/admin-kit": "workspace:*",
     "naive-ui": "2.43.2",
     "pinia": "3.0.4",
     "vue": "3.5.26",

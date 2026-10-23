@@ -10,8 +10,19 @@ dist/
 .env
 .env.local
 .env.*.local
+api/**/.env.production
+api/**/.env.test
 !.env.example
-!.env.test
+!web/.env.test
+!web/.env.prod
+!web/.env.sandbox
+!.env.production.example
+
+# deploy private keys
+*_id_ed25519
+*_id_rsa
+*.pem
+!*.pem.example
 
 # archives / junk
 *.zip

@@ -1,6 +1,6 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
 
-/** PayPal Webhook 原文。只留最近 500 条，用于排查，不驱动业务状态机。 */
+/** PayPal Webhook 原文。只留最近 500 条；CUSTOMER.DISPUTE.* 会驱动本地案件回写。 */
 @Entity({ name: 'pp_webhook_event', comment: 'PayPal Webhook 事件' })
 export class WebhookEventEntity {
   @PrimaryColumn({ type: 'varchar', length: 32, comment: '本地事件编号' })

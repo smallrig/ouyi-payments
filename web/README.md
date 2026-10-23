@@ -1,8 +1,8 @@
 # Payments 管理端（payments-web）
 
-ouyi-shop 工作台子应用，`VITE_APP_CODE=payments`。Vue 3 + Vite + Naive UI。登录使用 Logto（`@logto/browser`），换发本服务 JWT 后访问 `payments-admin-service`。
+ouyi-shop 工作台子应用，`VITE_APP_CODE=paypal`。Vue 3 + Vite + Naive UI。
 
-当前渠道以 PayPal 为主，产品定位为多收款账号与交易流水管理。
+登录：Identity **账号密码**（`VITE_STANDALONE_AUTH=Y`）或 Portal **SSO**（`/sso?ticket=`）。鉴权走 `@oy/admin-auth-sdk` → 网关 `/api/auth`。
 
 ## 本地
 
@@ -12,7 +12,8 @@ pnpm install
 pnpm dev   # http://127.0.0.1:9713
 ```
 
-需配置 `.env`（可参考 `.env.example`）。API 指向 `VITE_PAYPAL_API_TARGET`（默认 `http://127.0.0.1:3025`）。
+需配置 `.env`（参考 `.env.example`）。业务 API 默认代理 `/api/paypal` → `VITE_PAYPAL_API_TARGET`。
 
-1. 启动 [payments-admin-service](../api/services/payments-admin-service/README.md)，配置 `FRONTEND_URL=http://127.0.0.1:9713`
-2. 浏览器打开管理端，经 Logto 登录后绑定收款账号
+1. 启动 [payments-admin-service](../api/services/payments-admin-service/README.md)，`JWT_SECRET` 与 auth-service 一致
+2. 确保网关 `:3020` 与 Identity Portal `:9700` 可用
+3. 浏览器打开管理端登录，或从工作台 SSO 进入

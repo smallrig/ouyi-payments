@@ -2,16 +2,17 @@
 import { computed, onMounted, ref } from 'vue';
 import { Icon } from '@iconify/vue';
 import { NButton, NDataTable, NTabs, NTabPane, useMessage, type DataTableColumns } from 'naive-ui';
+import PpAsyncPane from '@/components/PpAsyncPane.vue';
 import PpEmptyState from '@/components/PpEmptyState.vue';
+import PpPageHero from '@/components/PpPageHero.vue';
 import { useClientPagination } from '@/composables/useClientPagination';
 import { fetchApiLogs, fetchWebhooks } from '@/api/paypal';
 import type { ApiLogItem, WebhookItem } from '@/api/types';
 import { formatDateTime } from '@/lib/format';
 
 const message = useMessage();
-const webhookUrl = import.meta.env.VITE_PAYPAL_WEBHOOK_URL || '';
-const loadingWebhooks = ref(false);
-const loadingLogs = ref(false);
+const loadingWebhooks = ref(true);
+const loadingLogs = ref(true);
 const webhooks = ref<WebhookItem[]>([]);
 const logs = ref<ApiLogItem[]>([]);
 
@@ -78,6 +79,11 @@ async function loadLogs() {
   }
 }
 
+const heroMetrics = computed(() => [
+  { label: 'Webhook', value: webhooks.value.length },
+  { label: 'API 日志', value: logs.value.length }
+]);
+
 onMounted(() => {
   void loadWebhooks();
   void loadLogs();
@@ -86,101 +92,93 @@ onMounted(() => {
 
 <template>
   <div class="pp-page">
-    <div class="pp-page-head">
-      <div>
-        <p class="pp-page-eyebrow">Ops</p>
-        <h1 class="pp-page-title">Webhook 与日志</h1>
-        <p class="pp-page-desc">Webhook 自动同步 PayPal 事件；API 日志记录管理端调用（不含密钥）。</p>
-      </div>
-    </div>
+    <PpPageHero
+      icon="mdi:timeline-text-outline"
+      kicker="运维观测"
+      title="Webhook 与日志"
+      description="Webhook 自动同步 PayPal 事件；API 日志记录管理端调用（不含密钥）。"
+      :metrics="heroMetrics"
+    >
+      <template #actions>
+        <NButton :loading="loadingWebhooks || loadingLogs" @click="() => { void loadWebhooks(); void loadLogs(); }">
+          <template #icon><Icon icon="mdi:refresh" width="16" /></template>
+          刷新
+        </NButton>
+      </template>
+    </PpPageHero>
 
     <NTabs type="line" animated>
       <NTabPane name="webhooks" tab="Webhook">
         <div class="tab-toolbar">
-          <NButton size="small" @click="loadWebhooks">刷新</NButton>
+          <NButton size="small" :loading="loadingWebhooks" @click="loadWebhooks">刷新</NButton>
         </div>
-        <NDataTable
-          :columns="webhookColumns"
-          :data="webhooks"
+        <PpAsyncPane
           :loading="loadingWebhooks"
-          :pagination="webhookPagination"
-          class="pp-panel"
-          :bordered="false"
+          icon="mdi:webhook"
+          title="加载 Webhook"
+          description="正在获取通知事件…"
+          compact
+          min-height="240px"
         >
-          <template #empty>
-            <PpEmptyState
-              compact
-              icon="mdi:webhook"
-              float-a="mdi:lightning-bolt-outline"
-              float-b="mdi:cloud-outline"
-              title="还没有 Webhook 事件"
-              description="在 PayPal Developer 控制台将通知 URL 指向本服务，支付与争议事件会自动落在此列表。"
-            >
-              <template #steps>
-                <ol class="pp-empty__steps">
-                  <li>
-                    <span class="pp-empty__step-num">1</span>
-                    <div>
-                      <strong>配置通知 URL</strong>
-                      <span>POST {{ webhookUrl }}</span>
-                    </div>
-                  </li>
-                  <li>
-                    <span class="pp-empty__step-num">2</span>
-                    <div>
-                      <strong>勾选事件类型</strong>
-                      <span>如支付完成、争议创建等</span>
-                    </div>
-                  </li>
-                  <li>
-                    <span class="pp-empty__step-num">3</span>
-                    <div>
-                      <strong>触发后点刷新</strong>
-                      <span>事件摘要会出现在本页</span>
-                    </div>
-                  </li>
-                </ol>
-              </template>
-              <template #actions>
-                <NButton type="primary" strong secondary @click="loadWebhooks">
-                  <template #icon><Icon icon="mdi:refresh" width="18" /></template>
-                  刷新列表
-                </NButton>
-              </template>
-            </PpEmptyState>
-          </template>
-        </NDataTable>
+          <PpEmptyState
+            v-if="!webhooks.length"
+            compact
+            icon="mdi:webhook"
+            title="还没有 Webhook 事件"
+            description="在 PayPal Developer 控制台将通知 URL 指向本服务，支付与争议事件会自动落在此列表。"
+          >
+            <template #actions>
+              <NButton type="primary" strong secondary @click="loadWebhooks">
+                <template #icon><Icon icon="mdi:refresh" width="18" /></template>
+                刷新列表
+              </NButton>
+            </template>
+          </PpEmptyState>
+          <NDataTable
+            v-else
+            :columns="webhookColumns"
+            :data="webhooks"
+            :pagination="webhookPagination"
+            class="pp-panel"
+            :bordered="false"
+          />
+        </PpAsyncPane>
       </NTabPane>
       <NTabPane name="logs" tab="API 日志">
         <div class="tab-toolbar">
-          <NButton size="small" @click="loadLogs">刷新</NButton>
+          <NButton size="small" :loading="loadingLogs" @click="loadLogs">刷新</NButton>
         </div>
-        <NDataTable
-          :columns="logColumns"
-          :data="logs"
+        <PpAsyncPane
           :loading="loadingLogs"
-          :pagination="logPagination"
-          class="pp-panel"
-          :bordered="false"
+          icon="mdi:timeline-text-outline"
+          title="加载 API 日志"
+          description="正在获取调用记录…"
+          compact
+          min-height="240px"
         >
-          <template #empty>
-            <PpEmptyState
-              compact
-              icon="mdi:timeline-text-outline"
-              float-a="mdi:api"
-              float-b="mdi:timer-outline"
-              title="暂无 API 调用日志"
-              description="管理端请求 PayPal 相关接口后，方法、路径、状态与耗时会记录在此，便于排查授权与查单问题。"
-            >
-              <template #actions>
-                <NButton type="primary" strong secondary @click="loadLogs">
-                  <template #icon><Icon icon="mdi:refresh" width="18" /></template>
-                  刷新日志
-                </NButton>
-              </template>
-            </PpEmptyState>
-          </template>
-        </NDataTable>
+          <PpEmptyState
+            v-if="!logs.length"
+            compact
+            icon="mdi:timeline-text-outline"
+            title="暂无 API 调用日志"
+            description="管理端请求 PayPal 相关接口后，方法、路径、状态与耗时会记录在此，便于排查授权与查单问题。"
+          >
+            <template #actions>
+              <NButton type="primary" strong secondary @click="loadLogs">
+                <template #icon><Icon icon="mdi:refresh" width="18" /></template>
+                刷新日志
+              </NButton>
+            </template>
+          </PpEmptyState>
+          <NDataTable
+            v-else
+            :columns="logColumns"
+            :data="logs"
+            :pagination="logPagination"
+            class="pp-panel"
+            :bordered="false"
+          />
+        </PpAsyncPane>
       </NTabPane>
     </NTabs>
   </div>

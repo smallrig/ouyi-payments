@@ -4,6 +4,7 @@ import { AuthUser } from '../common/auth-user';
 import { AccountService } from './account.service';
 import { PaypalClient } from '../paypal/paypal.client';
 import { CartImagesService } from '../cart/cart-images.service';
+import { SyncService } from '../sync/sync.service';
 
 /** 账号列表、授权撤销、交易同步和订单查询。非管理员只能看自己负责的账号。 */
 @Controller()
@@ -12,6 +13,7 @@ export class AccountController {
     private readonly accounts: AccountService,
     private readonly paypal: PaypalClient,
     private readonly images: CartImagesService,
+    private readonly syncJobs: SyncService,
   ) {}
 
   private user(req: any): AuthUser {
@@ -64,19 +66,35 @@ export class AccountController {
   @Post('accounts/:payerId/sync-transactions')
   async sync(@Req() req: any, @Param('payerId') payerId: string, @Body() body: { days?: number }) {
     await this.loadOwned(payerId, this.user(req), true);
-    const { body: report, debugId, range } = await this.paypal.searchTransactions(payerId, body?.days);
-    const items = report?.transaction_details || [];
-    const syncedAt = new Date().toISOString();
-    await this.accounts.writeTransactions(payerId, { syncedAt, range, items });
-    const acc = await this.accounts.findOne(payerId);
-    await this.accounts.upsert({ ...acc, payerId, lastSyncedAt: new Date(syncedAt) });
-    return { syncedAt, count: items.length, range, debugId };
+    return this.syncJobs.syncAccountTransactions(payerId, body?.days, 'manual');
   }
 
   @Get('accounts/:payerId/transactions')
-  async transactions(@Req() req: any, @Param('payerId') payerId: string) {
+  async transactions(
+    @Req() req: any,
+    @Param('payerId') payerId: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
     await this.loadOwned(payerId, this.user(req));
-    return this.accounts.readTransactions(payerId);
+    return this.accounts.readTransactions(payerId, this.parseRange(from, to));
+  }
+
+  /** from、to 为 ISO 时间。结束日由前端传到当天 23:59:59.999。 */
+  private parseRange(from?: string, to?: string) {
+    const start = this.parseInstant(from, '开始时间');
+    const end = this.parseInstant(to, '结束时间');
+    if (start && end && start.getTime() > end.getTime()) {
+      throw new PayPalError('开始时间不能晚于结束时间', { status: 400 });
+    }
+    return { from: start, to: end };
+  }
+
+  private parseInstant(value: string | undefined, label: string) {
+    if (!value) return undefined;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) throw new PayPalError(`${label}无效`, { status: 400 });
+    return date;
   }
 
   @Get('accounts/:payerId/orders/:orderId')

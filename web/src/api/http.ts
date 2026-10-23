@@ -14,12 +14,14 @@ export class ApiError extends Error {
 
 /**
  * 浏览器请求前缀。
- * 未配置 VITE_PAYPAL_API_BASE 时走预览同源代理 /api/paypal，避免跨域 Failed to fetch。
+ * 生产推荐留空 VITE_PAYPAL_API_BASE，走同源 /api（由 Nginx 反代到 payments-api），避免跨域与旧缓存误打静态站 405。
+ * 开发可设 VITE_PAYPAL_API_BASE，或走 Vite 代理 /api/paypal。
  */
 function paypalApiPrefix(): string {
   const direct = (import.meta.env.VITE_PAYPAL_API_BASE || '').replace(/\/$/, '');
   if (direct) return `${direct}/api`;
-  return '/api/paypal';
+  if (import.meta.env.DEV) return '/api/paypal';
+  return '/api';
 }
 
 export function paypalApiUrl(path: string): string {
